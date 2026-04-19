@@ -78,6 +78,118 @@ https://www.bentoml.com/blog/navigating-the-world-of-open-source-large-language-
 - Does Microsoft Foundary support BYO open source LLM?
   - Most recent version of foundary doco: https://learn.microsoft.com/en-us/azure/foundry/what-is-foundry
 
+## Solution components
+
+Migration-style deployment: sequential PowerShell scripts deploying Bicep files, split by ownership boundary. Each step can be run independently after its dependencies.
+
+VNet peering automatically exchanges routes for VNet address ranges — no UDRs needed at the infra level. The only UDR required is for the VPN client virtual IP pool (not part of any Azure VNet), deployed with the VPN step. Peering needs `allowForwardedTraffic: true` on the workload side for VPN traffic to traverse.
+
+### Corporate IT (infra)
+
+Creates resource groups, VNets, and peering. Controls network topology and address space. Business unit gets Contributor on their workload RG (which contains the VNet, so they can create subnets).
+
+```
+corp-it/
+  01-gateway-rg-vnet.ps1              # Gateway RG + VNet
+  02-shared-services-rg-vnet.ps1      # Shared Services RG + VNet + peering to gateway
+  03-workload-rg-vnet-peering.ps1     # Workload RG + VNet + peering to gateway & shared services
+                                      # Repeatable per workload. Business gets Contributor on RG.
+```
+
+### VPN (packaged separately)
+
+Normally corporate IT owns connectivity (ExpressRoute, S2S VPN). Here it's a standalone DIY component, swappable between strongSwan / Azure VPN Gateway / WireGuard.
+
+```
+vpn/
+  01-strongswan-vm.ps1                # VM, public IP, IP forwarding, NSG (UDP 500+4500)
+  02-certs.ps1                        # CA + server cert, store in Key Vault
+  03-client-routes.ps1                # UDR on workload subnet(s) for VPN client pool
+```
+
+### Shared services
+
+Often also corporate IT, but not strictly required. Could be owned by a business unit.
+
+```
+shared-services/
+  01-dns-zones.ps1                    # Private DNS Zone(s) + links to all VNets
+  02-keyvault.ps1                     # Key Vault (certs, API keys)
+  03-monitor.ps1                      # Log Analytics workspace + diagnostic settings
+```
+
+### Business workload
+
+Fully owned by the business unit, deployed into the workload RG that IT provisioned.
+
+```
+workload/
+  01-subnet-nsg.ps1                   # Subnet(s) + NSG rules
+  02-test-function.ps1                # Test Azure Function + private endpoint
+                                      # Returns /version, validates connectivity
+  03-llm-vm.ps1                       # GPU VM + model download + vLLM/Ollama serving
+                                      # Replaceable per model
+```
+
+### Summary
+
+| Category | Scope | Key resources | Owner |
+|----------|-------|---------------|-------|
+| Corp IT | Gateway RG | RG, VNet | IT |
+| Corp IT | Shared Services RG | RG, VNet, peering | IT |
+| Corp IT | Workload RG (×n) | RG, VNet, peering | IT (business gets Contributor) |
+| VPN | Gateway RG | strongSwan VM, public IP, certs, UDR | Separate (swappable) |
+| Shared Services | Shared Services RG | DNS zones, Key Vault, Monitor | IT or business |
+| Workload | Workload RG (×n) | Subnet, NSG, GPU VM, model, test function | Business unit |
+
+## VPN options
+
+Need a private connection from local machine (e.g. home) to the Azure VNet, so that local AI tools can connect to the LLM endpoint without going over the public internet. No need to own any IP addresses — all options work behind NAT / dynamic home IPs.
+
+### strongSwan on an Azure VM (chosen)
+
+IKEv2 VPN server running on a small Linux VM (e.g. B1s ~$4/month) inside the VNet. Clients use the native IKEv2 VPN client built into Windows, macOS, and Linux — no app install required. Certificate-based authentication.
+
+- Full IPv6 dual-stack support (transport and tunnel)
+- Native OS clients on all platforms (Windows, macOS, Linux)
+- EAP-MSCHAPv2 and EAP-TLS support for flexible client auth
+- Built-in virtual IP pool management (IPv4 + IPv6)
+- Azure docs recommend strongSwan for Linux IKEv2 clients
+- Official Android app available
+- No third-party dependencies — fully self-contained
+- Cost: ~$4/month (B1s VM) + public IP
+- Trade-off: you manage the VM (patching, strongSwan config)
+
+### Azure VPN Gateway P2S (future option)
+
+Managed Azure service with IKEv2 support. Native OS clients with certificate auth, or Azure VPN Client app for Entra ID auth.
+
+- Managed service — no VM to maintain
+- Dual-stack P2S supported (IPv4 + IPv6 client address pools), requires VpnGw1+
+- IKEv2 with native clients (cert auth) or OpenVPN with Azure VPN Client (Entra ID auth)
+- Official Azure networking pattern (matches landing zone architecture)
+- Cost: ~$140/month for VpnGw1 (minimum SKU for IKEv2 + IPv6). Basic SKU (~$27/month) does not support IKEv2, IPv6, or RADIUS.
+- Can deallocate gateway when not testing, but recreation takes ~30-45 minutes
+- Trade-off: higher cost, but zero server management
+
+### WireGuard on an Azure VM (future option)
+
+Modern VPN protocol on a small VM. Requires WireGuard app on the client (not native to any OS).
+
+- Full IPv6 dual-stack support
+- Excellent performance (kernel-level, low overhead)
+- Simple config (key pairs, no certificates or EAP)
+- No third-party service dependencies
+- Cost: ~$4/month (B1s VM) + public IP
+- Trade-off: requires app install on client machines (not native), more manual peer configuration, no built-in IP pool management
+
+### Not chosen
+
+- **Tailscale** — managed overlay network built on WireGuard. Very easy setup, but metadata goes through Tailscale's coordination servers, which conflicts with the "no data to third parties" goal.
+- **Libreswan** — similar to strongSwan but lacks EAP support, less suited to road-warrior/P2S scenarios, not referenced in Azure docs. Better for site-to-site or RHEL/FIPS environments.
+- **OpenVPN** — requires client app install on all platforms, no native OS support. No advantage over strongSwan for this use case.
+- **Azure Bastion** — browser-based access to a jumpbox VM, not a routable VPN. Can't route local tools through it to the LLM endpoint.
+
 ## Existing solutions
 
 Existing Bicep templates for deploying Azure AI Foundry with network isolation (all MIT licensed):
