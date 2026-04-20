@@ -23,7 +23,7 @@
         "ghcr.io/devcontainers/features/node:1": {}
 	},
 
-	"postCreateCommand": "sudo chsh vscode -s \"$(which pwsh)\" && npm install -g @fission-ai/openspec@latest",
+	"postCreateCommand": "sudo chsh vscode -s \"$(which pwsh)\" && npm install -g opencode-ai && npm install -g @fission-ai/openspec@latest",
 
 	// Configure tool-specific properties.
 	"customizations": {
@@ -38,7 +38,12 @@
 			"extensions": [
 				"ms-vscode.powershell",
                 "EditorConfig.EditorConfig",
-                "esbenp.prettier-vscode"
+                "esbenp.prettier-vscode",
+				"sst-dev.opencode",
+				"ms-azuretools.vscode-bicep",
+				"ms-azuretools.vscode-azureresourcegroups",
+				"mhutchie.git-graph",
+				"jebbs.plantuml"
 			]
 		}
 	}
