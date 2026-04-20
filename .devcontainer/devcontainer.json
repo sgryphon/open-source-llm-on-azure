@@ -19,10 +19,11 @@
 		"ghcr.io/devcontainers/features/git:1": {
 			"ppa": true,
 			"version": "os-provided"
-		}
+		},
+        "ghcr.io/devcontainers/features/node:1": {}
 	},
 
-	"postCreateCommand": "sudo chsh vscode -s \"$(which pwsh)\"",
+	"postCreateCommand": "sudo chsh vscode -s \"$(which pwsh)\" && npm install -g @fission-ai/openspec@latest",
 
 	// Configure tool-specific properties.
 	"customizations": {
@@ -35,7 +36,9 @@
 			
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
-				"ms-vscode.powershell"
+				"ms-vscode.powershell",
+                "EditorConfig.EditorConfig",
+                "esbenp.prettier-vscode"
 			]
 		}
 	}
