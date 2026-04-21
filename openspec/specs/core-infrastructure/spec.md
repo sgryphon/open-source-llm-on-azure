@@ -1,6 +1,14 @@
 # core-infrastructure
 
-## ADDED Requirements
+## Purpose
+
+Defines the foundational Azure resource groups, virtual networks, and peering
+topology that host the open-source LLM workload. This capability owns the
+scripts in `a-infrastructure/` that provision three resource groups (gateway,
+shared, workload), each containing a single dual-stack IPv4 + IPv6-ULA VNet,
+fully peered in a triangle topology, and the matching removal scripts.
+
+## Requirements
 
 ### Requirement: Scripts SHALL live in `a-infrastructure/` with sequential numeric prefixes
 
@@ -130,10 +138,10 @@ script).
 
 ### Requirement: Scripts SHALL NOT create subnets, NSGs, or any other Azure resources
 
-Scope is strictly limited to resource groups, VNets, and VNet peerings. Scripts
-in this capability SHALL NOT create subnets, network security groups, route
-tables, public IPs, VMs, Azure Functions, storage accounts, or any other Azure
-resources.
+Scripts in this capability SHALL NOT create subnets, network security groups,
+route tables, public IPs, VMs, Azure Functions, storage accounts, or any other
+Azure resources. Scope is strictly limited to resource groups, VNets, and VNet
+peerings.
 
 #### Scenario: Clean subscription contains only RGs, VNets, and peerings after full deploy
 
@@ -159,10 +167,7 @@ be named `peer-<srcRole>-to-<dstRole>` (e.g. `peer-workload-to-gateway`).
 
 ### Requirement: Peerings connecting the gateway SHALL allow forwarded traffic
 
-Peering halves connecting the gateway VNet to a spoke VNet (both directions)
-SHALL be created with `--allow-forwarded-traffic true`. Peering halves between
-shared and workload SHALL use the default (`false`). Every peering half SHALL
-have `--allow-vnet-access true`.
+Peering halves connecting the gateway VNet to a spoke VNet (both directions) SHALL be created with `--allow-forwarded-traffic true`. Peering halves between shared and workload SHALL use the default (`false`). Every peering half SHALL have `--allow-vnet-access true`.
 
 #### Scenario: Gateway-involving peerings allow forwarded traffic
 
@@ -179,11 +184,7 @@ have `--allow-vnet-access true`.
 
 ### Requirement: Deploy scripts SHALL be idempotent
 
-Re-running any deploy script against a subscription where it has already
-succeeded SHALL complete with exit code 0 and SHALL NOT produce errors,
-duplicates, or mutations to the existing resource group, VNet, or peerings.
-Peering creation SHALL be guarded by a `peering show` check so that pre-existing
-peerings are skipped rather than recreated.
+Re-running any deploy script against a subscription where it has already succeeded SHALL complete with exit code 0 and SHALL NOT produce errors, duplicates, or mutations to the existing resource group, VNet, or peerings. Peering creation SHALL be guarded by a `peering show` check so that pre-existing peerings are skipped rather than recreated.
 
 #### Scenario: Re-running a deploy script is a no-op
 
