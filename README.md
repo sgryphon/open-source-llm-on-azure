@@ -132,10 +132,10 @@ VNet peering automatically exchanges routes for VNet address ranges — no UDRs 
 Creates resource groups, VNets, and peering. Controls network topology and address space. Business unit gets Contributor on their workload RG (which contains the VNet, so they can create subnets).
 
 ```
-corp-it/
-  01-gateway-rg-vnet.ps1              # Gateway RG + VNet
-  02-shared-services-rg-vnet.ps1      # Shared Services RG + VNet + peering to gateway
-  03-workload-rg-vnet-peering.ps1     # Workload RG + VNet + peering to gateway & shared services
+a-infrastructure/
+  01-init-shared-rg.ps1               # Shared RG + VNet
+  02-init-gateway-rg.ps1              # Gateway RG + VNet + peering shared <-> gateway
+  03-init-workload-rg.ps1             # Workload RG + VNet + peerings to gateway & shared
                                       # Repeatable per workload. Business gets Contributor on RG.
 ```
 
