@@ -51,7 +51,9 @@
 [CmdletBinding()]
 param (
     ## Purpose prefix
-    [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'llm',
+    [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
+    ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
+    [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
     ## The Azure region where the resource is deployed.
     [string]$Region = $ENV:DEPLOY_REGION ?? 'australiaeast',
     ## Instance number uniquifier
@@ -67,7 +69,7 @@ To run interactively, start with:
 
 $VerbosePreference = 'Continue'
 
-$Workload = $ENV:DEPLOY_WORKLOAD ?? 'llm',
+$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
 $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $Region = $ENV:DEPLOY_REGION ?? 'australiaeast'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
@@ -111,7 +113,7 @@ $TagDictionary = [ordered]@{
     WorkloadName       = $Purpose
     DataClassification = 'Non-business'
     Criticality        = 'Low'
-    BusinessUnit       = 'IT'
+    BusinessUnit       = $Purpose
     Env                = $Environment
 }
 
@@ -121,13 +123,13 @@ $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary
 # Create
 
 Write-Verbose "Creating resource group $rgName"
-az group create --name $rgName -l $Location --tags $tags
+az group create --name $rgName --location $Region --tags $tags
 
 Write-Verbose "Creating virtual network $vnetName ($vnetIpPrefix, $vnetIPv4)"
 az network vnet create --name $vnetName `
                        --resource-group $rgName `
                        --address-prefixes $vnetIpPrefix $vnetIPv4 `
-                       --location $Location `
+                       --location $Region `
                        --tags $tags
 
 Write-Verbose "Initialise $rgName complete"

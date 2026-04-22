@@ -54,7 +54,7 @@
 [CmdletBinding()]
 param (
     ## Purpose prefix
-    [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'llm',
+    [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
     ## Workload prefix
     [string]$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
     ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
@@ -74,7 +74,8 @@ To run interactively, start with:
 
 $VerbosePreference = 'Continue'
 
-$Workload = $ENV:DEPLOY_WORKLOAD ?? 'llm',
+$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
+$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
 $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $Region = $ENV:DEPLOY_REGION ?? 'australiaeast'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
@@ -118,10 +119,10 @@ $vnetIPv4 = "10.$prefixByte.$($VnetId -bAnd 0xFF).0/24"
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 $TagDictionary = [ordered]@{
-    WorkloadName       = '$Workload'
+    WorkloadName       = $Workload
     DataClassification = 'Non-business'
     Criticality        = 'Low'
-    BusinessUnit       = 'IT'
+    BusinessUnit       = $Purpose
     Env                = $Environment
 }
 
@@ -131,13 +132,13 @@ $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary
 # Create
 
 Write-Verbose "Creating resource group $rgName"
-az group create --name $rgName -l $Location --tags $tags
+az group create --name $rgName -l $Region --tags $tags
 
 Write-Verbose "Creating virtual network $vnetName ($vnetIpPrefix, $vnetIPv4)"
 az network vnet create --name $vnetName `
                        --resource-group $rgName `
                        --address-prefixes $vnetIpPrefix $vnetIPv4 `
-                       --location $Location `
+                       --location $Region `
                        --tags $tags
 
 # Peering
@@ -150,6 +151,7 @@ function NewPeeringIfMissing (
         [string]$remoteVnetName,
         [boolean]$allowForwardedTraffic
     )
+{
     Write-Verbose "Checking peering $Name on $VNetName"
     $existing = az network vnet peering show `
         --name $peerName `
@@ -180,10 +182,10 @@ function NewPeeringIfMissing (
 }
 
 # Peering Workload <-> Hub (forwarded-traffic true on both halves)
-$peerVnetToHubName = "peer-$Purpose-$Workload-$Environment-to-hub"
-$peerHubToVnetName = "peer-$Purpose-hub-to-$Workload-$Environment"
+$peerVnetToHubName = "peer-$Purpose-$Workload-$Environment-to-hub".ToLowerInvariant()
+$peerHubToVnetName = "peer-$Purpose-hub-to-$Workload-$Environment".ToLowerInvariant()
 
-New-PeeringIfMissing $peerVnetToHubName $rgName $vnetName $coreRgName $hubVnetName $true
-New-PeeringIfMissing $peerHubToVnetName $coreRgName $hubVnetName $rgName $vnetName $true
+NewPeeringIfMissing $peerVnetToHubName $rgName $vnetName $coreRgName $hubVnetName $true
+NewPeeringIfMissing $peerHubToVnetName $coreRgName $hubVnetName $rgName $vnetName $true
 
 Write-Verbose "Initialise $rgName complete"
