@@ -94,7 +94,6 @@ $rgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $rg = az group show --name $rgName | ConvertFrom-Json
 
 $vnetName = "vnet-$Purpose-hub-$Region-$Instance".ToLowerInvariant()
-
 $gatewayNsgName = "nsg-$Purpose-gateway-$Environment-001".ToLowerInvariant()
 $gatewaySubnetName = "snet-$Purpose-gateway-$Environment-$($rg.location)-001".ToLowerInvariant()
 

@@ -63,9 +63,9 @@ param (
     [string]$Region = $ENV:DEPLOY_REGION ?? 'australiaeast',
     ## Instance number uniquifier
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
-    ## IPv6 Unique Local Address GlobalID to use (default hash of subscription ID)
+    ## Ten character IPv6 Unique Local Address GlobalID to use (default hash of subscription ID)
     [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
-    ## IPv6 Unique Local Address vnet ID to use for workload subnet (default 02)
+    ## Two character IPv6 Unique Local Address vnet ID to use for workload subnet (default 02)
     [string]$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02")
 )
 
@@ -80,7 +80,7 @@ $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $Region = $ENV:DEPLOY_REGION ?? 'australiaeast'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 $UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10)
-$VnetId = $ENV:DEPLOY_CORE_VNET_ID ?? ("01")
+$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02")
 #>
 
 $ErrorActionPreference="Stop"
@@ -113,7 +113,7 @@ $vnetIpPrefix = "$vnetAddress/56"
 
 # Use the first byte of the ULA Global ID, and the vnet ID (as decimal)
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
-$vnetIPv4 = "10.$prefixByte.$($VnetId -bAnd 0xFF).0/24"
+$vnetIPv4 = "10.$prefixByte.$("0x" + $VnetId -bAnd 0xFF).0/24"
 
 # Following standard tagging conventions from  Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
