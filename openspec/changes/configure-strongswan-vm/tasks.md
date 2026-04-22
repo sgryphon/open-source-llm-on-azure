@@ -1,7 +1,7 @@
 ## 1. Repo hygiene and tooling
 
-- [ ] 1.1 Add `temp/` (repo-root) to `.gitignore`, and verify `git status` ignores newly-created files under temp paths.
-- [ ] 1.2 Update the devcontainer (`.devcontainer/Dockerfile` or feature config) to install `openssl` and `strongswan-pki`; rebuild and verify `which pki` + `which openssl` both succeed in a fresh container.
+- [x] 1.1 Add `temp/` (repo-root) to `.gitignore`, and verify `git status` ignores newly-created files under temp paths.
+- [x] 1.2 Update the devcontainer (`.devcontainer/Dockerfile` or feature config) to install `openssl` and `strongswan-pki`; rebuild and verify `which pki` + `which openssl` both succeed in a fresh container.
 
 ## 2. Shared cert address / FQDN helper logic
 
