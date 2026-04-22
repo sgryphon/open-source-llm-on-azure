@@ -129,9 +129,7 @@ if (-not $ServerDnsLabel) {
 }
 Write-Verbose "Server DNS label stem: $ServerDnsLabel"
 
-# --- Reusable snippet: derive IPv6 / IPv4 PIP FQDNs from parameters ---------
-# NOTE: This snippet is duplicated in `05-Deploy-StrongSwanVm.ps1` on purpose.
-# Keep the two copies in sync. Do not extract to a module (see AGENTS.md).
+# Derive IPv6 / IPv4 PIP FQDNs from parameters
 $locationLower = $Location.ToLowerInvariant()
 $ipv6Fqdn = "$ServerDnsLabel.$locationLower.cloudapp.azure.com".ToLowerInvariant()
 $ipv4Fqdn = "$ServerDnsLabel-ipv4.$locationLower.cloudapp.azure.com".ToLowerInvariant()
@@ -225,9 +223,18 @@ else {
     Write-Verbose "Issuing server cert (DN: CN=$serverCn, SANs: $($fqdnList -join ', '), 5-year lifetime) -> $serverPemPath"
     $serverPemTmp = "$serverPemPath.partial"
     if (Test-Path $serverPemTmp) { Remove-Item $serverPemTmp -Force }
-    # `pki --issue` requires a public key on stdin; derive it from the private key.
-    pki --pub --in $serverKeyPath | pki @pkiIssueArgs > $serverPemTmp
-    if ($LASTEXITCODE -ne 0) { throw "pki --issue (server) failed with exit code $LASTEXITCODE" }
+    # Materialise the public key to a small temp file, in PEM so the file can be read as text.
+    $serverPubTmp = Join-Path $TempPath 'strongswan-server.pub.partial'
+    if (Test-Path $serverPubTmp) { Remove-Item $serverPubTmp -Force }
+    pki --pub --in $serverKeyPath --outform pem > $serverPubTmp
+    if ($LASTEXITCODE -ne 0) { throw "pki --pub (server) failed with exit code $LASTEXITCODE" }
+    try {
+        pki @pkiIssueArgs --in $serverPubTmp > $serverPemTmp
+        if ($LASTEXITCODE -ne 0) { throw "pki --issue (server) failed with exit code $LASTEXITCODE" }
+    }
+    finally {
+        if (Test-Path $serverPubTmp) { Remove-Item $serverPubTmp -Force }
+    }
     Move-Item -Path $serverPemTmp -Destination $serverPemPath -Force
 }
 
@@ -275,14 +282,26 @@ else {
         Write-Verbose "Issuing client cert (DN: CN=$clientCn, clientAuth EKU, 1-year lifetime) -> $clientPemPath"
         $clientPemTmp = "$clientPemPath.partial"
         if (Test-Path $clientPemTmp) { Remove-Item $clientPemTmp -Force }
-        pki --pub --in $clientKeyPath | pki --issue `
-            --cacert $caPemPath `
-            --cakey  $caKeyPath `
-            --dn "CN=$clientCn" `
-            --lifetime (365).ToString() `
-            --flag clientAuth `
-            --outform pem > $clientPemTmp
-        if ($LASTEXITCODE -ne 0) { throw "pki --issue (client) failed with exit code $LASTEXITCODE" }
+        # Same rationale as the server block: materialise the public key as PEM
+        # text to a temp file rather than piping binary DER through PowerShell.
+        $clientPubTmp = Join-Path $TempPath "strongswan-client-$clientId.pub.partial"
+        if (Test-Path $clientPubTmp) { Remove-Item $clientPubTmp -Force }
+        pki --pub --in $clientKeyPath --outform pem > $clientPubTmp
+        if ($LASTEXITCODE -ne 0) { throw "pki --pub (client) failed with exit code $LASTEXITCODE" }
+        try {
+            pki --issue `
+                --cacert $caPemPath `
+                --cakey  $caKeyPath `
+                --dn "CN=$clientCn" `
+                --lifetime (365).ToString() `
+                --flag clientAuth `
+                --outform pem `
+                --in $clientPubTmp > $clientPemTmp
+            if ($LASTEXITCODE -ne 0) { throw "pki --issue (client) failed with exit code $LASTEXITCODE" }
+        }
+        finally {
+            if (Test-Path $clientPubTmp) { Remove-Item $clientPubTmp -Force }
+        }
         Move-Item -Path $clientPemTmp -Destination $clientPemPath -Force
     }
 
@@ -372,12 +391,8 @@ Set-KvSecretValueIfAbsent -VaultName $kvName -Name $clientP12SecretName    -Valu
 $clientP12Pwd = (Get-Content -Path $clientP12PwdPath -Raw).Trim()
 Set-KvSecretValueIfAbsent -VaultName $kvName -Name $clientP12PwdSecretName -Value $clientP12Pwd
 
-# Negative assertion: the CA *private* key MUST NOT be uploaded.
-# Per spec requirement "04 SHALL upload cert material with deterministic secret
-# names" and design D3: the CA key stays only in ./temp/ so only whoever ran
-# `04` can sign new client certs. Any future change adding a CA-key upload
-# should be a deliberate, reviewed modification of that requirement.
-# (No code here; this is an explicit non-action.)
+# The CA *private* key is not uploaded.
+# The CA key stays only in ./temp/ so the local user can re-issue keys if needed.
 
 # Verify: all five expected secrets now exist.
 Write-Verbose "Confirming Key Vault secrets:"

@@ -133,6 +133,7 @@ $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary
 
 Write-Verbose "Creating resource group $rgName"
 az group create --name $rgName -l $Region --tags $tags
+if ($LASTEXITCODE -ne 0) { throw "az group create failed for '$rgName'" }
 
 Write-Verbose "Creating virtual network $vnetName ($vnetIpPrefix, $vnetIPv4)"
 az network vnet create --name $vnetName `
