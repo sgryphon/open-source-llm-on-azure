@@ -122,24 +122,39 @@ EAP-MSCHAPv2 credentials are **not** stored in Key Vault in this MVP — they ar
 
 **Chosen:** The VPN client pool is a pure strongSwan construct. It is declared in `swanctl.conf` under `pools`, strongSwan allocates addresses to clients on connect, and traffic is bridged into the VNet by:
 
-- IPv4: `iptables -t nat -A POSTROUTING -s <ipv4-pool> -o eth0 -j MASQUERADE`. VNet resources see the VM's IPv4; no routing changes are needed in Azure.
-- IPv6: `ip6tables -A FORWARD -s <ipv6-pool> -j ACCEPT` + the symmetric reverse rule. VNet resources see the client's ULA address directly; this works because the pool ULA prefix is derived from the same `UlaGlobalId` as the VNets and is reachable via existing peerings once a UDR is added on the workload subnet (that UDR is out of scope for this change; the VM itself will still be reachable without it).
+- IPv4: `iptables -t nat -A POSTROUTING -s <ipv4-subnet> -o eth0 -j MASQUERADE`. VNet resources see the VM's IPv4; no routing changes are needed in Azure.
+- IPv6: `ip6tables -A FORWARD -s <ipv6-subnet> -j ACCEPT` + the symmetric reverse rule. VNet resources see the client's ULA address directly; this works because the pool's `/64` is derived from the same `UlaGlobalId` as the VNets and is reachable via existing peerings once a UDR is added on the workload subnet (that UDR is out of scope for this change; the VM itself will still be reachable without it).
 
-No Azure VNet, subnet, or NSG is created for the pool. The pool range lives only inside the VM's strongSwan config and iptables rules.
+No Azure VNet, subnet, or NSG is created for the pool. The subnet identity lives only inside the VM's strongSwan config and iptables rules.
 
-Addresses (for a given `UlaGlobalId` decomposed as `gg gggg gggggg`, and default `-VpnVnetId 02`):
+**Addressing — two layers**
 
-- IPv4 pool: `10.<gg-decimal>.2.0/24` (e.g. `10.171.2.0/24` when `gg=0xab`)
-- IPv6 pool: `fd<gg>:<gggg>:<gggggg>:0200::/112` (plenty of client addresses without exhausting the `/64`)
+We distinguish the conceptual *subnet* (what routing and firewall rules reference) from the *allocation range* strongSwan actually hands out. For a given `UlaGlobalId` decomposed as `gg gggg gggggg`, and default `-VpnVnetId 02`:
 
-The `/112` for IPv6 is a deliberate choice: it keeps the pool identifiable (shares the subnet-ID nibble `02`) but leaves room to carve sibling ranges in the same `/64` later if needed.
+|                               | IPv4                  | IPv6                                             |
+|-------------------------------|-----------------------|--------------------------------------------------|
+| **VPN "subnet"** (routing, NAT/FORWARD scope) | `10.<gg>.2.0/24` (e.g. `10.171.2.0/24`) | `fd<gg>:<gggg>:<gggggg>:0200::/64` |
+| **strongSwan `pools` range**  | `10.<gg>.2.128/25`    | `fd<gg>:<gggg>:<gggggg>:0200::1000/116`          |
+| **Reserved** (static / future infra) | `.1–.127`      | `::1–::fff`                                      |
+
+**IPv6 is always `/64`** — this is the protocol norm; SLAAC, privacy addresses (RFC 4941), and every IPv6 neighbour-discovery mechanism assume a 64-bit interface identifier. The project-wide ULA scheme in `core-infrastructure` already uses `/64` for every subnet; the VPN "subnet" is no exception. strongSwan itself does not do SLAAC on the virtual IPs it hands out (it's IKE CHILD_SA addressing, not an Ethernet-style link), but we still use `/64` as the subnet identity so that any routing, NSG, or future UDR references are consistent with the rest of the landing zone.
+
+The narrower **`pools`** range (`::1000/116` for IPv6, `.128/25` for IPv4) is purely a convenience:
+
+- Memorable client addresses in logs.
+- A clean gap for any future static / reserved assignments (e.g. if we ever give the VM its own address on this virtual link, or pin a specific client to a specific address).
+- `/116` gives 4096 IPv6 addresses — vastly more than we'd ever use, but trivially small vs. the full `/64`.
+
+The iptables/ip6tables FORWARD and MASQUERADE rules are scoped to the **full subnet** (`10.<gg>.2.0/24`, `fd…:0200::/64`) so that static assignments inside the same subnet would Just Work without rule changes.
 
 **Alternatives considered:**
 
 - *A real Azure VNet for clients* (requiring a new `a-infrastructure/03-initialize-VpnVnet.ps1`) — Rejected after investigation: strongSwan road-warrior P2S does not need one. The pool is purely an IPsec construct; Azure doesn't see or route it.
-- *Carve from inside the hub VNet `/64`* — Works, but blurs the boundary and makes a future workload-subnet UDR harder to reason about.
+- *Use `/112` or other non-/64 IPv6 sizing for the subnet itself* — Rejected: violates IPv6 convention, fragments the ULA allocation scheme, gains nothing (address scarcity does not exist at ULA scale).
+- *Hand `pools` the full `/64` and `/24`* — Works, but makes it awkward to later carve out static / infrastructure addresses inside the same subnet without reconfiguring strongSwan.
+- *Carve from inside the hub VNet `/64`* — Works, but blurs the boundary between the hub and the VPN pool and makes a future workload-subnet UDR harder to target.
 
-**Rationale:** Confirmed via the strongSwan swanctl documentation and the standard Linux road-warrior patterns: `pools` + MASQUERADE/forward is the entire story. Keeping this in the VM script (`05`) means there's no infra-level coupling to this change.
+**Rationale:** Matches the project-wide ULA `/64`-per-subnet scheme, keeps strongSwan's allocation range small and readable, and leaves room for future static assignments inside the same subnet without rework. Confirmed via the strongSwan swanctl documentation: `pools` + MASQUERADE/forward is the entire story for P2S.
 
 ### D11. Two scripts with independent lifecycles, numeric ordering preserved
 
@@ -240,14 +255,20 @@ Kept on `05` (unchanged from the Leshan script): `-Purpose`, `-Environment`, `-O
 
 The PowerShell script substitutes these tokens into a copy of `strongswan-cloud-init.txt` written to `b-shared/temp/strongswan-cloud-init.txt~`:
 
-| Token                  | Substituted value                                  |
-|------------------------|----------------------------------------------------|
-| `#INIT_VPN_USERNAME#`  | `$VpnUsername`                                     |
-| `#INIT_VPN_PASSWORD#`  | `$VpnUserPassword`                                 |
-| `#INIT_VIP_POOL_IPV4#` | Computed from `$UlaGlobalId` + `$VpnVnetId`        |
-| `#INIT_VIP_POOL_IPV6#` | Computed from `$UlaGlobalId` + `$VpnVnetId`        |
-| `#INIT_SERVER_FQDNS#`  | Comma-separated list of PIP FQDNs (IPv6, optional IPv4) |
-| `#INIT_ADMIN_USER#`    | `$AdminUsername` (for home-directory path when emitting cert retrieval hints) |
+| Token                     | Substituted value                                  |
+|---------------------------|----------------------------------------------------|
+| `#INIT_VPN_USERNAME#`     | `$VpnUsername`                                     |
+| `#INIT_VPN_PASSWORD#`     | `$VpnUserPassword`                                 |
+| `#INIT_VPN_SUBNET_IPV4#`  | VPN IPv4 subnet (e.g. `10.171.2.0/24`) — used for iptables NAT/FORWARD scope |
+| `#INIT_VPN_SUBNET_IPV6#`  | VPN IPv6 `/64` subnet — used for ip6tables FORWARD scope                   |
+| `#INIT_VIP_POOL_IPV4#`    | strongSwan IPv4 allocation range (e.g. `10.171.2.128/25`)                  |
+| `#INIT_VIP_POOL_IPV6#`    | strongSwan IPv6 allocation range (e.g. `fd…:0200::1000/116`)               |
+| `#INIT_SERVER_FQDNS#`     | Comma-separated list of PIP FQDNs (IPv6, optional IPv4) |
+| `#INIT_KEY_VAULT_NAME#`   | Key Vault name to fetch CA / server cert / server key from |
+| `#INIT_CA_SECRET_NAME#`   | `strongswan-<env>-ca-cert`                                                 |
+| `#INIT_SERVER_CERT_SECRET_NAME#` | `strongswan-<env>-server-cert`                                      |
+| `#INIT_SERVER_KEY_SECRET_NAME#`  | `strongswan-<env>-server-key`                                       |
+| `#INIT_ADMIN_USER#`       | `$AdminUsername`                                                           |
 
 All Leshan-era tokens (`#INIT_HOST_NAMES#`, `#INIT_PASSWORD_INPUT#`) are removed.
 
