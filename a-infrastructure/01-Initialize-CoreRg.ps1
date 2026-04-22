@@ -6,7 +6,7 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * Resource group  `rg-llm-core-001`
+    * Resource group `rg-llm-core-001`
     * Virtual network `vnet-llm-hub-australiaeast-001`, dual-stack (IPv6 ULA + IPv4)
 
   Addresses are derived deterministically with an IPv6 ULA Global ID 10-hex-character
@@ -46,7 +46,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./01-init-core-rg.ps1
+   ./01-Initialize-CoreRg.ps1
 #>
 [CmdletBinding()]
 param (
@@ -110,7 +110,6 @@ $vnetIPv4 = "10.$prefixByte.$($VnetId -bAnd 0xFF).0/24"
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 $TagDictionary = [ordered]@{
-    WorkloadName       = $Purpose
     DataClassification = 'Non-business'
     Criticality        = 'Low'
     BusinessUnit       = $Purpose

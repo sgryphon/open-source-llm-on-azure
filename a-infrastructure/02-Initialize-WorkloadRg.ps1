@@ -6,7 +6,7 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * Resource group  `rg-llm-workload-dev-001`
+    * Resource group `rg-llm-workload-dev-001`
     * Virtual network `vnet-llm-workload-dev-australiaeast-001`, dual-stack
     * Peering `peer-llm-workload-dev-to-hub`    (workload VNet side)   -- allow-forwarded-traffic true
     * Peering `peer-llm-hub-to-workload-dev`    (hub VNet side)        -- allow-forwarded-traffic true
@@ -49,7 +49,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./02-init-workload-rg.ps1
+   ./02-Initialize-WorkloadRg.ps1
 #>
 [CmdletBinding()]
 param (
