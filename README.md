@@ -144,11 +144,14 @@ a-infrastructure/
 Normally corporate IT owns connectivity (ExpressRoute, S2S VPN). Here it's a standalone DIY component, swappable between strongSwan / Azure VPN Gateway / WireGuard.
 
 ```
+b-shared/
+  04-Deploy-Certificate.ps1           # CA + server + initial client certs -> Key Vault
+  05-Deploy-StrongSwanVm.ps1          # VM, public IPs, IP forwarding, NSG (UDP 500+4500)
 vpn/
-  01-strongswan-vm.ps1                # VM, public IP, IP forwarding, NSG (UDP 500+4500)
-  02-certs.ps1                        # CA + server cert, store in Key Vault
-  03-client-routes.ps1                # UDR on workload subnet(s) for VPN client pool
+  03-client-routes.ps1                # UDR on workload subnet(s) for VPN client pool (future)
 ```
+
+Run order: `b-shared/01..03` -> `b-shared/04-Deploy-Certificate.ps1` -> `b-shared/05-Deploy-StrongSwanVm.ps1`. `05` requires `-VpnUserPassword` (env `DEPLOY_VPN_USER_PASSWORD`) for the EAP-MSCHAPv2 credential.
 
 ### Shared services
 
