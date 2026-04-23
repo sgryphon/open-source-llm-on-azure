@@ -182,10 +182,11 @@ Write-Verbose "Server FQDNs: $($fqdnList -join ', ')"
 $prefix = "fd$($UlaGlobalId.Substring(0, 2)):$($UlaGlobalId.Substring(2, 4)):$($UlaGlobalId.Substring(6))"
 
 # IPv6 subnet: fd<gg>:<gggg>:<gggg>:<VpnVnetId>00::/64
-$vnetAddress = [IPAddress]"$($prefix):$($VnetId)00::"
-$vpnSubnetIPv6 = "$vnetAddress" + '::/64'
+$vnetAddress   = [IPAddress]"$($prefix):$($VpnVnetId)00::"
+$vpnSubnetIPv6 = "$vnetAddress/64"
 # IPv6 pool: /116 at ::1000 inside the /64.
-$vipPoolIPv6   = "$vnetAddress" + '::1000/116'
+$poolBase    = [IPAddress]"$($prefix):$($VpnVnetId)00::1000"
+$vipPoolIPv6 = "$poolBase/116"
 
 # IPv4: 10.<ggDec>.<vpnVnetDec>.0/24 ; pool = upper half /25 at .128.
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"

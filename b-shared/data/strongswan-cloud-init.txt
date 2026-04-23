@@ -55,7 +55,15 @@ write_files:
       connections {
         roadwarrior {
           version = 2
-          proposals = aes256-sha256-modp2048,default
+          # IKE (phase 1) proposals. Order is preference: strongest first.
+          # The last two entries (modp1024) exist solely for native Windows
+          # IKEv2, which - absent a custom IPsec policy set via
+          # `Set-VpnConnectionIPsecConfiguration` - proposes only
+          # AES-CBC-{128,256} + SHA1/SHA256 + MODP_1024 (DH group 2) and will
+          # otherwise be rejected with "received proposals unacceptable".
+          # strongSwan picks the first mutually-acceptable entry, so modern
+          # clients still negotiate modp2048+.
+          proposals = aes256-sha256-modp2048,aes256-sha256-modp3072,aes256gcm16-prfsha384-ecp384,aes256-sha256-modp1024,aes128-sha1-modp1024,default
           pools = vpn_pool_ipv4, vpn_pool_ipv6
           dpd_delay = 30s
           send_cert = always
@@ -76,7 +84,10 @@ write_files:
           children {
             ikev2-roadwarrior {
               local_ts = 0.0.0.0/0,::/0
-              esp_proposals = aes256-sha256,default
+              # ESP (phase 2) proposals. Windows native IKEv2 defaults to
+              # AES-CBC-{128,256} with SHA1/SHA256 (no PFS), so include those
+              # alongside the modern AEAD options. Strongest first.
+              esp_proposals = aes256-sha256,aes256gcm16,aes128-sha256,aes128-sha1,default
               dpd_action = clear
               start_action = none
             }
