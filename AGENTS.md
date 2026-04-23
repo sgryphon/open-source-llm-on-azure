@@ -18,8 +18,6 @@ embedded in these scripts (migration-style, forward-only; rationale in README).
 
 ## Script conventions
 
-Applies to every `.ps1` in `a-infrastructure/`, `b-shared/`, `c-workload/`:
-
 - `#!/usr/bin/env pwsh`, `[CmdletBinding()]`, `$ErrorActionPreference = 'Stop'`.
 - Comment-based help: `.SYNOPSIS`, `.DESCRIPTION`, `.NOTES`, `.EXAMPLE`.
 - `Write-Verbose` on every significant step — an operator running with
@@ -65,6 +63,8 @@ means subnets are /26 to /28, depending on how many we need, and how many addres
 Different subscriptions get non-overlapping ranges automatically, enabling safe
 peering. Never hardcode addresses; always derive.
 
+- Don't single-stack IPv4. Don't hardcode addresses.
+
 ### IPv6 notes (common pitfalls)
 
 - **Subnets are always `/64`.** SLAAC, privacy addresses
@@ -81,30 +81,18 @@ peering. Never hardcode addresses; always derive.
 
 ## Secrets and private material
 
-- `./temp/` at the repo root is **gitignored**; it holds generated keys, certs,
-  PKCS#12 bundles, and cloud-init files with substituted values. Never commit
-  anything from `./temp/`.
-- Key Vault is the canonical store for anything that needs to cross machines.
-  Upload idempotently (`az keyvault secret show` pre-check).
+- `./temp/` at the repo root is **gitignored**; it holds generated files.
 - Scripts accept secrets via parameter or env var, never via a file checked
   into the repo.
+- Don't commit anything from `./temp/`.
 
-## Folder map
+## Project specific details
 
 | Path                 | Contents                                           |
 |----------------------|----------------------------------------------------|
-| `a-infrastructure/`  | RGs, VNets, peering (corporate-IT scope)           |
-| `b-shared/`          | Shared services: Key Vault, Monitor, VPN gateway   |
-| `c-workload/`        | LLM VM, test function, workload-specific resources |
-| `util/`              | One-shot helpers (e.g. RG teardown)                |
+| `a-infrastructure/`  | Entities usually allocated at corporate-IT scope   |
+| `b-shared/`          | Shared services across workloads                   |
+| `c-workload/`        | Workload-specific resources                        |
+| `util/`              | One-shot helpers                                   |
 | `openspec/`          | Specs and in-flight changes                        |
 
-## Don'ts
-
-- Don't single-stack IPv4. Don't hardcode addresses.
-- Don't commit anything from `./temp/`.
-- Don't use the `Az` PowerShell module. Don't add Bicep/Terraform to these
-  scripts without a design discussion.
-- Don't introduce desired-state tooling — this project is migration-style.
-- Don't create resources a script doesn't explicitly own (each script's scope
-  is the resources it creates, nothing more).
