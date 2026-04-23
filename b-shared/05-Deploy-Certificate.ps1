@@ -36,9 +36,9 @@
     (from `strongswan-pki`) and `openssl` are on PATH. Running `which pki` and
     `which openssl` should both succeed before running this script.
 
-  PAIRS WITH 05-Deploy-StrongSwanVm.ps1
-  `04` generates the server cert with subjectAltName DNS entries that match the
-  public FQDNs that `05` will assign to the VM. That only works if both scripts
+  PAIRS WITH 06-Deploy-StrongSwanVm.ps1
+  `05` generates the server cert with subjectAltName DNS entries that match the
+  public FQDNs that `06` will assign to the VM. That only works if both scripts
   compute the same FQDNs from the same parameters. The FQDNs are deterministic:
 
       IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
@@ -49,9 +49,9 @@
                       (default: first 4 hex chars of the subscription id,
                        prefixed with "0x").
     * `<Environment>` comes from `-Environment` / `DEPLOY_ENVIRONMENT`.
-    * `<Location>`    on `04` is `-Location` / `DEPLOY_LOCATION` (default
-                      `australiaeast`); on `05` it is taken from the RG's
-                      location, which must match the `04` value.
+    * `<Location>`    on `05` is `-Location` / `DEPLOY_LOCATION` (default
+                      `australiaeast`); on `06` it is taken from the RG's
+                      location, which must match the `05` value.
 
   If any of `-OrgId`, `-Environment`, `-Location`, or `-AddPublicIpv4` differ
   between the two runs, the server cert SANs won't match the VM's FQDNs and
@@ -68,7 +68,7 @@
   az login
   az account set --subscription <subscription id>
   $VerbosePreference = 'Continue'
-  ./b-shared/04-Deploy-Certificate.ps1
+  ./b-shared/05-Deploy-Certificate.ps1
 #>
 [CmdletBinding()]
 param (
@@ -417,4 +417,4 @@ Write-Output "  Server key         : $serverKeySecretName"
 Write-Output "  Client 001 PKCS#12 : $clientP12SecretName (base64)"
 Write-Output "  Client 001 P12 pwd : $clientP12PwdSecretName"
 Write-Output ""
-Write-Output "Next: run ./b-shared/05-Deploy-StrongSwanVm.ps1 -VpnUserPassword <pwd>"
+Write-Output "Next: run ./b-shared/06-Deploy-StrongSwanVm.ps1 -VpnUserPassword <pwd>"

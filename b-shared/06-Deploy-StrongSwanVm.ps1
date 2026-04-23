@@ -11,11 +11,17 @@
     * One public IPv6 (Standard SKU, static), and optionally one public IPv4.
     * One NIC with a primary IPv4 ip-config + a secondary IPv6 ip-config,
       attached to the gateway subnet, with Azure-level IP forwarding enabled.
-    * One Ubuntu LTS VM with a system-assigned managed identity and a
-      rendered cloud-init payload from `data/strongswan-cloud-init.txt`.
-    * A `Key Vault Secrets User` RBAC role assignment on the shared Key Vault
-      so the VM can fetch its cert material via its managed identity.
+    * One Ubuntu LTS VM bound to the shared user-assigned managed identity
+      `id-<Purpose>-strongswan-<Environment>-<Instance>` (created by
+      `03-Deploy-VpnIdentity.ps1`) and a rendered cloud-init payload from
+      `data/strongswan-cloud-init.txt`.
     * An optional auto-shutdown schedule.
+
+  The VM's managed identity is granted `get, list` on the shared Key Vault's
+  secrets by `03-Deploy-VpnIdentity.ps1` (via Key Vault access policy, not
+  RBAC -- see `02-Deploy-KeyVault.ps1` for the mode rationale). This script
+  therefore does not manage Key Vault permissions; it only consumes the
+  pre-provisioned identity.
 
   The rendered cloud-init file pulls the CA cert, server cert, and server
   private key from Key Vault at first boot and brings up the strongSwan
@@ -24,28 +30,29 @@
 
 .NOTES
   PREREQUISITES
-  * `01-Deploy-AzureMonitor.ps1`, `02-Deploy-KeyVault.ps1`, and
-    `03-Deploy-GatewaySubnet.ps1` must have run for this environment.
-  * `04-Deploy-Certificate.ps1` must have run; this script fails early if the
+  * `01-Deploy-AzureMonitor.ps1`, `02-Deploy-KeyVault.ps1`,
+    `03-Deploy-VpnIdentity.ps1`, and `04-Deploy-GatewaySubnet.ps1` must have
+    run for this environment.
+  * `05-Deploy-Certificate.ps1` must have run; this script fails early if the
     CA/server/server-key secrets are missing in Key Vault.
 
-  PAIRS WITH 04-Deploy-Certificate.ps1
-  The server cert SANs are issued by `04` from the same deterministic FQDN
+  PAIRS WITH 05-Deploy-Certificate.ps1
+  The server cert SANs are issued by `05` from the same deterministic FQDN
   formulas. `-OrgId`, `-Environment`, `-Location` (via RG), and
-  `-AddPublicIpv4` MUST match the values used when `04` ran. Exporting the
+  `-AddPublicIpv4` MUST match the values used when `05` ran. Exporting the
   matching `DEPLOY_*` env vars once and running both scripts in the same
   shell is the recommended workflow.
 
       IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
       IPv4 FQDN = "strongswan-<OrgId>-<Environment>-ipv4.<Location>.cloudapp.azure.com"
 
-  `<Location>` is derived here from the core RG's location; `04` takes it as
+  `<Location>` is derived here from the core RG's location; `05` takes it as
   an explicit parameter with `australiaeast` as the default.
 
   VPN CLIENT POOL ADDRESSING
   The VPN client IP pool is a pure strongSwan construct (no Azure VNet /
   subnet is created for it). Addresses are derived deterministically from
-  `-UlaGlobalId` (the same hash used by `03-Deploy-GatewaySubnet.ps1`) and
+  `-UlaGlobalId` (the same hash used by `04-Deploy-GatewaySubnet.ps1`) and
   `-VpnVnetId` (default `02`). For a ULA Global ID decomposed as
   `gg gggg gggggg`:
 
@@ -69,11 +76,15 @@
   az account set --subscription <subscription id>
   $VerbosePreference = 'Continue'
   $env:DEPLOY_VPN_USER_PASSWORD = 'replace-me'
-  ./b-shared/05-Deploy-StrongSwanVm.ps1
+  ./b-shared/06-Deploy-StrongSwanVm.ps1
 #>
 [CmdletBinding()]
 param (
-    ## Purpose prefix (matches `02-Deploy-KeyVault.ps1` / `03-Deploy-GatewaySubnet.ps1`).
+    ## EAP-MSCHAPv2 password (REQUIRED).
+    [string]$VpnUserPassword = $ENV:DEPLOY_VPN_USER_PASSWORD,
+    ## EAP-MSCHAPv2 username seeded into swanctl secrets.
+    [string]$VpnUsername = $ENV:DEPLOY_VPN_USERNAME ?? 'vpnuser',
+    ## Purpose prefix (matches `02-Deploy-KeyVault.ps1` / `04-Deploy-GatewaySubnet.ps1`).
     [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
     ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
@@ -85,13 +96,9 @@ param (
     [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_D2s_v6',
     ## Linux admin account name (authentication via SSH key).
     [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'admin',
-    ## EAP-MSCHAPv2 username seeded into swanctl secrets.
-    [string]$VpnUsername = $ENV:DEPLOY_VPN_USERNAME ?? 'vpnuser',
-    ## EAP-MSCHAPv2 password (REQUIRED).
-    [string]$VpnUserPassword = $ENV:DEPLOY_VPN_USER_PASSWORD,
     ## Two-character VPN vnet id (addressing slot, not an Azure VNet).
     [string]$VpnVnetId = $ENV:DEPLOY_VPN_VNET_ID ?? '02',
-    ## Ten-character IPv6 ULA Global ID (MUST match `03-Deploy-GatewaySubnet.ps1`).
+    ## Ten-character IPv6 ULA Global ID (MUST match `04-Deploy-GatewaySubnet.ps1`).
     [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
     ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4"). Must match `04`.
     [string]$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL,
@@ -152,16 +159,31 @@ $vnet    = az network vnet show --name $vnetName --resource-group $rgName 2>$nul
 if (-not $vnet) { throw "VNet '$vnetName' not found. Run `a-infrastructure/01-*.ps1` first." }
 
 $gwSnet  = az network vnet subnet show --name $gatewaySubnetName -g $rgName --vnet-name $vnetName 2>$null | ConvertFrom-Json
-if (-not $gwSnet) { throw "Gateway subnet '$gatewaySubnetName' not found. Run `b-shared/03-Deploy-GatewaySubnet.ps1` first." }
+if (-not $gwSnet) { throw "Gateway subnet '$gatewaySubnetName' not found. Run `b-shared/04-Deploy-GatewaySubnet.ps1` first." }
 
 $gwNsg   = az network nsg show --name $gatewayNsgName -g $rgName 2>$null | ConvertFrom-Json
-if (-not $gwNsg) { throw "Gateway NSG '$gatewayNsgName' not found. Run `b-shared/03-Deploy-GatewaySubnet.ps1` first." }
+if (-not $gwNsg) { throw "Gateway NSG '$gatewayNsgName' not found. Run `b-shared/04-Deploy-GatewaySubnet.ps1` first." }
 
 $kvName  = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 $kv      = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
 if (-not $kv) { throw "Key Vault '$kvName' not found. Run `b-shared/02-Deploy-KeyVault.ps1` first." }
-$kvResourceId = $kv.id
-Write-Verbose "Resolved shared resources: RG=$rgName, VNet=$vnetName, Subnet=$gatewaySubnetName, NSG=$gatewayNsgName, KV=$kvName"
+
+# Resolve the shared VPN user-assigned managed identity. It is created and
+# granted Key Vault access by `03-Deploy-VpnIdentity.ps1`; this script only
+# binds it to the VM. Pre-provisioning the identity (rather than using a
+# system-assigned MI created alongside the VM) decouples permissions from
+# VM lifecycle and eliminates any permission-propagation race on first boot.
+$identityName = "id-$Purpose-strongswan-$Environment-$Instance".ToLowerInvariant()
+$identity     = az identity show --name $identityName --resource-group $rgName 2>$null | ConvertFrom-Json
+if (-not $identity) {
+    throw "Managed identity '$identityName' not found. Run `b-shared/03-Deploy-VpnIdentity.ps1` first."
+}
+$uamiResourceId = $identity.id
+$uamiClientId   = $identity.clientId
+if (-not $uamiResourceId -or -not $uamiClientId) {
+    throw "Managed identity '$identityName' is missing an id or clientId."
+}
+Write-Verbose "Resolved shared resources: RG=$rgName, VNet=$vnetName, Subnet=$gatewaySubnetName, NSG=$gatewayNsgName, KV=$kvName, UAMI=$identityName"
 
 # ---------------------------------------------------------------------------
 # Derived names and addressing.
@@ -183,7 +205,7 @@ $pipV6DnsLabel = $ServerDnsLabel.ToLowerInvariant()
 $pipV4DnsLabel = "$ServerDnsLabel-ipv4".ToLowerInvariant()
 
 # --- Reusable snippet: derive IPv6 / IPv4 PIP FQDNs from parameters ---------
-# NOTE: Duplicated in `04-Deploy-Certificate.ps1`; keep the two copies in
+# NOTE: Duplicated in `05-Deploy-Certificate.ps1`; keep the two copies in
 # sync. See AGENTS.md on "do not extract to a module".
 $ipv6Fqdn = "$pipV6DnsLabel.$locationLower.cloudapp.azure.com"
 $ipv4Fqdn = "$pipV4DnsLabel.$locationLower.cloudapp.azure.com"
@@ -217,7 +239,7 @@ Write-Verbose "VPN subnets: IPv4=$vpnSubnetIPv4, IPv6=$vpnSubnetIPv6"
 Write-Verbose "VPN pools  : IPv4=$vipPoolIPv4, IPv6=$vipPoolIPv6"
 # ---------------------------------------------------------------------------
 
-# Secret names must match those written by `04-Deploy-Certificate.ps1`.
+# Secret names must match those written by `05-Deploy-Certificate.ps1`.
 $envLower              = $Environment.ToLowerInvariant()
 $secretPrefix          = "strongswan-$envLower"
 $caSecretName          = "$secretPrefix-ca-cert"
@@ -226,17 +248,17 @@ $serverKeySecretName   = "$secretPrefix-server-key"
 $clientP12SecretName   = "$secretPrefix-client-001-p12"
 $clientP12PwdSecretName= "$secretPrefix-client-001-p12-password"
 
-Write-Verbose "Verifying Key Vault secrets from 04-Deploy-Certificate.ps1 ..."
+Write-Verbose "Verifying Key Vault secrets from 05-Deploy-Certificate.ps1 ..."
 foreach ($name in @($caSecretName, $serverCertSecretName, $serverKeySecretName)) {
     $s = az keyvault secret show --vault-name $kvName --name $name 2>$null | ConvertFrom-Json
     if (-not ($s -and $s.value)) {
-        throw "Key Vault secret '$name' is missing in '$kvName'. Run `b-shared/04-Deploy-Certificate.ps1` first."
+        throw "Key Vault secret '$name' is missing in '$kvName'. Run `b-shared/05-Deploy-Certificate.ps1` first."
     }
     Write-Verbose "  OK: $name"
 }
 
 # ---------------------------------------------------------------------------
-# Tag dictionary matching 03-Deploy-GatewaySubnet.ps1's style.
+# Tag dictionary matching 04-Deploy-GatewaySubnet.ps1's style.
 # ---------------------------------------------------------------------------
 
 $TagDictionary = [ordered]@{
@@ -382,6 +404,7 @@ $subs = [ordered]@{
     '#INIT_SERVER_CERT_SECRET_NAME#' = $serverCertSecretName
     '#INIT_SERVER_KEY_SECRET_NAME#'  = $serverKeySecretName
     '#INIT_ADMIN_USER#'              = $AdminUsername
+    '#INIT_UAMI_CLIENT_ID#'          = $uamiClientId
 }
 foreach ($k in $subs.Keys) {
     $rendered = $rendered.Replace($k, [string]$subs[$k])
@@ -396,12 +419,17 @@ if ($leftover.Count -gt 0) {
 Write-Verbose "Rendered cloud-init passed token-substitution check."
 
 # ---------------------------------------------------------------------------
-# 13. VM create + managed-identity RBAC + auto-shutdown.
+# 13. VM create + user-assigned managed identity binding + auto-shutdown.
 # ---------------------------------------------------------------------------
+# The VM is bound to the shared user-assigned managed identity
+# `$identityName`. Key Vault access for that identity is pre-provisioned by
+# `03-Deploy-VpnIdentity.ps1` (access-policy entry, since the vault runs in
+# access-policy mode -- see `02-Deploy-KeyVault.ps1`). This script does not
+# manage Key Vault permissions.
 
 $vm = az vm show --name $vmName -g $rgName 2>$null | ConvertFrom-Json
 if (-not $vm) {
-    Write-Verbose "Creating VM '$vmName' (size $VmSize, image UbuntuLTS, managed identity)"
+    Write-Verbose "Creating VM '$vmName' (size $VmSize, image UbuntuLTS, UAMI '$identityName')"
     az vm create `
         --resource-group $rgName `
         --name $vmName `
@@ -412,40 +440,18 @@ if (-not $vm) {
         --admin-username $AdminUsername `
         --generate-ssh-keys `
         --nics $nicName `
-        --assign-identity `
+        --assign-identity $uamiResourceId `
         --custom-data $renderedPath `
         --tags $tags `
         --output none
     if ($LASTEXITCODE -ne 0) { throw "az vm create '$vmName' failed." }
 } else {
     Write-Verbose "VM '$vmName' already present, skipping create."
-    # Ensure managed identity exists (no-op if already assigned).
-    az vm identity assign --name $vmName --resource-group $rgName --output none
+    # Ensure the UAMI is attached to the existing VM (no-op if already attached).
+    # Note: any pre-existing system-assigned identity on the VM is left
+    # untouched; it has no Key Vault access so is harmless.
+    az vm identity assign --name $vmName --resource-group $rgName --identities $uamiResourceId --output none
     if ($LASTEXITCODE -ne 0) { throw "az vm identity assign failed." }
-}
-
-$miPrincipalId = az vm identity show --name $vmName --resource-group $rgName --query principalId --output tsv
-if (-not $miPrincipalId) { throw "Could not read managed identity principalId for '$vmName'." }
-Write-Verbose "VM managed identity principal id: $miPrincipalId"
-
-# RBAC: Key Vault Secrets User on the shared Key Vault (idempotent).
-$existingRole = az role assignment list `
-    --assignee-object-id $miPrincipalId `
-    --assignee-principal-type ServicePrincipal `
-    --role 'Key Vault Secrets User' `
-    --scope $kvResourceId `
-    --output json | ConvertFrom-Json
-if ($existingRole -and $existingRole.Count -gt 0) {
-    Write-Verbose "Role assignment 'Key Vault Secrets User' already present for VM managed identity."
-} else {
-    Write-Verbose "Granting 'Key Vault Secrets User' on '$kvName' to VM managed identity."
-    az role assignment create `
-        --role 'Key Vault Secrets User' `
-        --assignee-object-id $miPrincipalId `
-        --assignee-principal-type ServicePrincipal `
-        --scope $kvResourceId `
-        --output none
-    if ($LASTEXITCODE -ne 0) { throw "az role assignment create failed." }
 }
 
 if ($ShutdownUtc) {

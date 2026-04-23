@@ -1,7 +1,7 @@
 #cloud-config
 # strongSwan IKEv2 road-warrior VPN gateway.
 #
-# This file is a template. `b-shared/05-Deploy-StrongSwanVm.ps1` substitutes
+# This file is a template. `b-shared/06-Deploy-StrongSwanVm.ps1` substitutes
 # every `#INIT_*#` token before passing the result to `az vm create
 # --custom-data`. If you see a `#INIT_*#` token at boot time, the render step
 # failed its post-render assertion; check the PowerShell script output.
@@ -102,8 +102,9 @@ write_files:
       }
 
   # First-boot bootstrap script. Pulls CA + server cert + server key from
-  # Key Vault via managed identity, with a retry loop to absorb RBAC
-  # propagation delay, then configures firewall/NAT and loads strongSwan.
+  # Key Vault via managed identity, with a retry loop to absorb any
+  # first-boot transient (e.g. guest-OS network / IMDS not yet ready), then
+  # configures firewall/NAT and loads strongSwan.
   - path: /usr/local/sbin/strongswan-bootstrap.sh
     owner: root:root
     permissions: '0755'
@@ -115,16 +116,20 @@ write_files:
       CA_SECRET='#INIT_CA_SECRET_NAME#'
       SRV_CERT_SECRET='#INIT_SERVER_CERT_SECRET_NAME#'
       SRV_KEY_SECRET='#INIT_SERVER_KEY_SECRET_NAME#'
+      UAMI_CLIENT_ID='#INIT_UAMI_CLIENT_ID#'
 
       VPN_SUBNET_V4='#INIT_VPN_SUBNET_IPV4#'
       VPN_SUBNET_V6='#INIT_VPN_SUBNET_IPV6#'
 
       mkdir -p /etc/swanctl/x509ca /etc/swanctl/x509 /etc/swanctl/private
 
-      # 1. Log in with the VM's managed identity and fetch cert material.
-      # Retry for up to ~120s to cope with RBAC propagation delay.
+      # 1. Log in with the VM's user-assigned managed identity and fetch cert
+      # material. Key Vault access was granted to this identity by
+      # `03-Deploy-VpnIdentity.ps1` before the VM was created, so no
+      # permission-propagation race is expected. Retry for up to ~120s anyway
+      # to absorb guest-OS network / IMDS readiness on first boot.
       deadline=$((SECONDS + 120))
-      until az login --identity --output none 2>/dev/null; do
+      until az login --identity --username "$UAMI_CLIENT_ID" --output none 2>/dev/null; do
         if [ $SECONDS -ge $deadline ]; then
           echo "ERROR: az login --identity did not succeed within 120s" >&2
           exit 1

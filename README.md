@@ -145,13 +145,15 @@ Normally corporate IT owns connectivity (ExpressRoute, S2S VPN). Here it's a sta
 
 ```
 b-shared/
-  04-Deploy-Certificate.ps1           # CA + server + initial client certs -> Key Vault
-  05-Deploy-StrongSwanVm.ps1          # VM, public IPs, IP forwarding, NSG (UDP 500+4500)
+  03-Deploy-VpnIdentity.ps1           # User-assigned managed identity + Key Vault access policy
+  04-Deploy-GatewaySubnet.ps1         # Gateway subnet + NSG (note: `03` in the old numbering)
+  05-Deploy-Certificate.ps1           # CA + server + initial client certs -> Key Vault
+  06-Deploy-StrongSwanVm.ps1          # VM, public IPs, IP forwarding, NSG (UDP 500+4500)
 vpn/
   03-client-routes.ps1                # UDR on workload subnet(s) for VPN client pool (future)
 ```
 
-Run order: `b-shared/01..03` -> `b-shared/04-Deploy-Certificate.ps1` -> `b-shared/05-Deploy-StrongSwanVm.ps1`. `05` requires `-VpnUserPassword` (env `DEPLOY_VPN_USER_PASSWORD`) for the EAP-MSCHAPv2 credential.
+Run order: `b-shared/01..04` -> `b-shared/05-Deploy-Certificate.ps1` -> `b-shared/06-Deploy-StrongSwanVm.ps1`. `06` requires `-VpnUserPassword` (env `DEPLOY_VPN_USER_PASSWORD`) for the EAP-MSCHAPv2 credential.
 
 ### Shared services
 

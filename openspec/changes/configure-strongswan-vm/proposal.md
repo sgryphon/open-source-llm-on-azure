@@ -6,27 +6,28 @@ No first-party Azure template or quickstart deploys strongSwan (confirmed via Mi
 
 ## What Changes
 
-- **Split** the placeholder into two scripts with independent lifecycles:
-  - **New** `b-shared/04-Deploy-Certificate.ps1` — generates the VPN CA and server/client certificates **locally** (on the operator's machine / devcontainer) into `./temp/`, then uploads them to the existing shared Key Vault. Idempotent (skip generation if PEMs already in `./temp/`, skip upload if secret already in Key Vault).
-  - **Rewrite + rename** `b-shared/04-Deploy-StrongSwanVm.ps1` → `b-shared/05-Deploy-StrongSwanVm.ps1` — deploys the Ubuntu VM, NIC, NSG rules, and cloud-init that **pulls** the server cert and CA from Key Vault using a system-assigned managed identity.
+- **Split** the placeholder into three scripts with independent lifecycles:
+  - **New** `b-shared/03-Deploy-VpnIdentity.ps1` — creates the user-assigned managed identity (UAMI) that the VPN VM will bind at create time, and grants it `get, list` on secrets in the shared Key Vault via an access-policy entry. Idempotent.
+  - **New** `b-shared/05-Deploy-Certificate.ps1` — generates the VPN CA and server/client certificates **locally** (on the operator's machine / devcontainer) into `./temp/`, then uploads them to the existing shared Key Vault. Idempotent (skip generation if PEMs already in `./temp/`, skip upload if secret already in Key Vault).
+  - **Rewrite + rename** `b-shared/04-Deploy-StrongSwanVm.ps1` → `b-shared/06-Deploy-StrongSwanVm.ps1` — deploys the Ubuntu VM, NIC, NSG rules, and cloud-init that **pulls** the server cert and CA from Key Vault using the pre-provisioned UAMI.
 - Add `temp/` (project root) to `.gitignore` so generated keys and temp cloud-init files are never committed.
 - Update the devcontainer to include the tooling needed for local cert generation: `openssl` (for self-signed CA, PKCS#12 packaging) and `strongswan-pki` package (provides the `pki` binary; Azure CLI and PowerShell are already present). Operator rebuilds the container before running the new scripts.
-- Replace the Leshan-specific NSG rule (`AllowLwM2M`, UDP 5683/5684) with IKEv2 rules added by `05-Deploy-StrongSwanVm.ps1`: **UDP 500** (IKE) and **UDP 4500** (NAT-T / ESP-over-UDP). Both created idempotently (skip if present).
+- Replace the Leshan-specific NSG rule (`AllowLwM2M`, UDP 5683/5684) with IKEv2 rules added by `06-Deploy-StrongSwanVm.ps1`: **UDP 500** (IKE) and **UDP 4500** (NAT-T / ESP-over-UDP). Both created idempotently (skip if present).
 - Enable **Azure-level IP forwarding** on the VM's NIC (`az network nic update --ip-forwarding true`) so the VM can forward tunnelled traffic into the VNet.
 - Remove the dead copy-paste references to `$Region`, `$prefixByte`, `$VnetId`, `$SubnetId`, and the broken `$gatewaySubnetIPv4` calculation. Addressing info comes from the subnet returned by `az network vnet subnet show`.
 - Drop the `$WebPassword` / Caddy basic-auth flow entirely. Add a `-VpnUserPassword` parameter (env `DEPLOY_VPN_USER_PASSWORD`) and `-VpnUsername` (default `vpnuser`) on the VM script for the EAP-MSCHAPv2 credential; this is seeded into the VM's `swanctl.conf` via cloud-init placeholders (not stored in Key Vault for now — documented in design as an Open Question).
-- Grant the VM's **system-assigned managed identity** `get` permission on the VPN-related Key Vault secrets so cloud-init can retrieve the cert material at first boot.
+- Grant the VM's **user-assigned managed identity** (created by `03-Deploy-VpnIdentity.ps1`) `get, list` permissions on secrets in the shared Key Vault via an **access-policy** entry (the vault is provisioned in access-policy mode, not RBAC mode, because the project's operator runs as Contributor via group membership and cannot create role assignments). Cloud-init retrieves cert material at first boot by logging in with `az login --identity --username <uami-client-id>`.
 - Rewrite `b-shared/data/strongswan-cloud-init.txt` to:
   - Install `strongswan`, `strongswan-swanctl`, `libcharon-extra-plugins`, `libstrongswan-extra-plugins`, `iptables-persistent`, and `azure-cli` (remove Caddy, `default-jre`, Leshan).
   - Enable OS-level IP forwarding (`net.ipv4.ip_forward=1`, `net.ipv6.conf.all.forwarding=1`) via `/etc/sysctl.d/`.
-  - Use the VM's managed identity (`az login --identity`) to fetch the **CA cert** and **server cert + key** from Key Vault and place them under `/etc/swanctl/x509ca/` and `/etc/swanctl/x509/` + `/etc/swanctl/private/`.
+  - Use the VM's UAMI (`az login --identity --username "$UAMI_CLIENT_ID"`) to fetch the **CA cert** and **server cert + key** from Key Vault and place them under `/etc/swanctl/x509ca/` and `/etc/swanctl/x509/` + `/etc/swanctl/private/`.
   - Write `/etc/swanctl/swanctl.conf` with an IKEv2 road-warrior connection supporting **both** EAP-MSCHAPv2 (username/password seeded via `#INIT_VPN_USER#` / `#INIT_VPN_PASSWORD#`) **and** client-cert pubkey auth against the fetched CA. The server always authenticates with its cert.
   - Assign clients from a deterministic **virtual IP pool** (IPv4 `#INIT_VIP_POOL_IPV4#`, IPv6 `#INIT_VIP_POOL_IPV6#`) passed in from the PowerShell script. The pool is a **routed address range entirely internal to the VPN VM** (strongSwan handles allocation; IPv4 egress is MASQUERADE'd through the VM's NIC, IPv6 is forwarded directly). It does **not** require an Azure VNet or subnet.
   - Configure `iptables` MASQUERADE (IPv4) + FORWARD and `ip6tables` FORWARD rules via `iptables-persistent`.
   - Open UFW ports `22/tcp`, `500/udp`, `4500/udp`.
   - Enable and start `strongswan` + `swanctl --load-all`.
-- Derive the client VIP pool addresses in the VM PowerShell script from the same subscription ULA Global ID used by the gateway subnet (reusing the hash pattern from `03-Deploy-GatewaySubnet.ps1`), with a new `-VpnVnetId` parameter (default `02`) to keep the VPN pool distinct from the hub VNet range.
-- On completion of `05-Deploy-StrongSwanVm.ps1`, print the VPN server FQDN(s), the Key Vault secret names containing the CA cert and client `.p12` bundle, and a one-liner showing how to download them.
+- Derive the client VIP pool addresses in the VM PowerShell script from the same subscription ULA Global ID used by the gateway subnet (reusing the hash pattern from `04-Deploy-GatewaySubnet.ps1`), with a new `-VpnVnetId` parameter (default `02`) to keep the VPN pool distinct from the hub VNet range.
+- On completion of `06-Deploy-StrongSwanVm.ps1`, print the VPN server FQDN(s), the Key Vault secret names containing the CA cert and client `.p12` bundle, and a one-liner showing how to download them.
 - Update the SYNOPSIS / NOTES comment blocks of both PS1 scripts to describe strongSwan (currently the placeholder still says "Eclipse Leshan LwM2M server").
 
 ## Capabilities
@@ -40,16 +41,18 @@ No first-party Azure template or quickstart deploys strongSwan (confirmed via Mi
 ## Impact
 
 - **Files created / rewritten**:
-  - `b-shared/04-Deploy-Certificate.ps1` (new)
-  - `b-shared/05-Deploy-StrongSwanVm.ps1` (rewritten from the current `04-Deploy-StrongSwanVm.ps1`; old file deleted)
+  - `b-shared/03-Deploy-VpnIdentity.ps1` (new — UAMI + Key Vault access-policy grant)
+  - `b-shared/04-Deploy-GatewaySubnet.ps1` (renamed from `03-Deploy-GatewaySubnet.ps1`, unchanged content)
+  - `b-shared/05-Deploy-Certificate.ps1` (new)
+  - `b-shared/06-Deploy-StrongSwanVm.ps1` (rewritten from the current `04-Deploy-StrongSwanVm.ps1`; old file deleted)
   - `b-shared/data/strongswan-cloud-init.txt` (rewritten)
   - `.gitignore` (add `temp/`)
   - `.devcontainer/` Dockerfile or feature config (add `openssl`, `strongswan-pki`)
-- **New prerequisites**: `04-Deploy-Certificate.ps1` must run before `05-Deploy-StrongSwanVm.ps1`. Both require `02-Deploy-KeyVault.ps1` to have run. `05` must also run after `03-Deploy-GatewaySubnet.ps1`.
-- **Key Vault wiring**: The VM's system-assigned managed identity is granted `get` on the VPN-related secrets by `05`. The operator running `04` already has secret `set` permissions from deploying the Key Vault.
-- **Networking**: `05` adds UDP 500/4500 rules to the gateway NSG; enables IP forwarding on the VM NIC. No VNet, subnet, or UDR changes (VPN client pool is an internal routed range — confirmed no Azure subnet needed).
+- **New prerequisites**: `03-Deploy-VpnIdentity.ps1` must run after `02-Deploy-KeyVault.ps1`. `05-Deploy-Certificate.ps1` must run before `06-Deploy-StrongSwanVm.ps1`; both also require `02-Deploy-KeyVault.ps1`. `06` must also run after `03-Deploy-VpnIdentity.ps1` and `04-Deploy-GatewaySubnet.ps1`.
+- **Key Vault wiring**: The vault is created in **access-policy mode** by `02-Deploy-KeyVault.ps1`. `03-Deploy-VpnIdentity.ps1` grants the VPN UAMI `get, list` on secrets via an access-policy entry (not RBAC). The operator running `05` already has `all` secret permissions from deploying the Key Vault.
+- **Networking**: `06` adds UDP 500/4500 rules to the gateway NSG; enables IP forwarding on the VM NIC. No VNet, subnet, or UDR changes (VPN client pool is an internal routed range — confirmed no Azure subnet needed).
 - **Secrets / parameters**:
-  - New env vars: `DEPLOY_VPN_USER_PASSWORD` (required by `05`), `DEPLOY_VPN_USERNAME` (optional, default `vpnuser`), `DEPLOY_VPN_VNET_ID` (optional, default `02`).
+  - New env vars: `DEPLOY_VPN_USER_PASSWORD` (required by `06`), `DEPLOY_VPN_USERNAME` (optional, default `vpnuser`), `DEPLOY_VPN_VNET_ID` (optional, default `02`).
   - Removed: `DEPLOY_WEB_PASSWORD`.
 - **Cost**: Unchanged (one small Linux VM + one public IP, per the README).
 - **Downstream**: Unblocks the workload-side UDR step mentioned in `README.md` (`vpn/03-client-routes.ps1`), which is out of scope for this change.

@@ -77,7 +77,7 @@ peering. Never hardcode addresses; always derive.
   **allocation range** inside it (e.g. a DHCPv6 / VPN pool — narrower, purely
   a convenience).
 - Azure limitations: some features are IPv4-only; `az` CLI cannot create
-  `Icmpv6` NSG rules (workaround noted in `b-shared/03-Deploy-GatewaySubnet.ps1`).
+  `Icmpv6` NSG rules (workaround noted in `b-shared/04-Deploy-GatewaySubnet.ps1`).
 
 ## Secrets and private material
 
