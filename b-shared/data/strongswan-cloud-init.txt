@@ -15,6 +15,13 @@ apt:
   conf: |
     Acquire::Retries "60";
     DPkg::Lock::Timeout "60";
+  # The Azure CLI is not in the default Ubuntu archive; add Microsoft's apt
+  # repo (and its signing key) so the `packages:` list below resolves.
+  sources:
+    azure-cli.list:
+      source: "deb [arch=amd64 signed-by=$KEY_FILE] https://packages.microsoft.com/repos/azure-cli/ $RELEASE main"
+      keyid: EB3E94ADBE1229CF
+      keyserver: keyserver.ubuntu.com
 
 package_upgrade: true
 packages:
@@ -129,7 +136,12 @@ write_files:
       # permission-propagation race is expected. Retry for up to ~120s anyway
       # to absorb guest-OS network / IMDS readiness on first boot.
       deadline=$((SECONDS + 120))
-      until az login --identity --username "$UAMI_CLIENT_ID" --output none 2>/dev/null; do
+      # Note: --allow-no-subscriptions is required because the UAMI is
+      # intentionally not granted any role on any subscription (its only
+      # permission is a Key Vault access-policy entry for secret get/list,
+      # which is a data-plane grant not a role assignment). Without this
+      # flag, `az login --identity` fails enumerating subscriptions.
+      until az login --identity --client-id "$UAMI_CLIENT_ID" --allow-no-subscriptions --output none 2>/dev/null; do
         if [ $SECONDS -ge $deadline ]; then
           echo "ERROR: az login --identity did not succeed within 120s" >&2
           exit 1
@@ -180,7 +192,10 @@ write_files:
       # 4. Apply sysctl and start strongSwan.
       sysctl --system
 
-      systemctl enable --now strongswan
+      # On Ubuntu, the unit is `strongswan-starter` (not `strongswan`); the
+      # latter exists only on RHEL-family distros. Both `swanctl --load-all`
+      # below and the daemon are managed via this unit.
+      systemctl enable --now strongswan-starter
       # Brief settle, then load config. `swanctl --load-all` is idempotent.
       sleep 2
       swanctl --load-all

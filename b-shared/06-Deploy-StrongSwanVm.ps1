@@ -17,49 +17,25 @@
       `data/strongswan-cloud-init.txt`.
     * An optional auto-shutdown schedule.
 
-  The VM's managed identity is granted `get, list` on the shared Key Vault's
-  secrets by the earlier VPN-identity script (via Key Vault access policy,
-  not RBAC -- the vault runs in access-policy mode). This script therefore
-  does not manage Key Vault permissions; it only consumes the pre-provisioned
-  identity.
-
   The rendered cloud-init file pulls the CA cert, server cert, and server
   private key from Key Vault at first boot and brings up the strongSwan
   service with one road-warrior connection accepting both EAP-MSCHAPv2 and
   client-certificate auth.
 
 .NOTES
-  PREREQUISITES
-  * The shared Azure Monitor, Key Vault, VPN identity, and gateway-subnet
-    scripts in this folder must have run for this environment.
-  * The certificate-deployment script in this folder must have run; this
-    script fails early if the CA/server/server-key secrets are missing in
-    Key Vault.
-
-  PAIRS WITH THE CERTIFICATE-DEPLOYMENT SCRIPT
-  The server cert SANs are issued from the same deterministic FQDN
-  formulas. `-OrgId`, `-Environment`, `-Location` (via RG), and
-  `-AddPublicIpv4` MUST match the values used when the certificate script
-  ran. Exporting the matching `DEPLOY_*` env vars once and running both
-  scripts in the same shell is the recommended workflow.
-
-      IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
-      IPv4 FQDN = "strongswan-<OrgId>-<Environment>-ipv4.<Location>.cloudapp.azure.com"
-
-  `<Location>` is derived here from the core RG's location; the certificate
-  script takes it as an explicit parameter with `australiaeast` as the
-  default.
+  IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
+  IPv4 FQDN = "strongswan-<OrgId>-<Environment>-ipv4.<Location>.cloudapp.azure.com"
 
   VPN CLIENT POOL ADDRESSING
   The VPN client IP pool is a pure strongSwan construct (no Azure VNet /
   subnet is created for it). Addresses are derived deterministically from
   `-UlaGlobalId` (the same hash used by the gateway-subnet script) and
   `-VpnVnetId` (default `02`). For a ULA Global ID decomposed as
-  `gg gggg gggggg`:
+  `gg gggg gggg`:
 
       IPv4 subnet  = 10.<gg-dec>.<VpnVnetId-dec>.0/24
       IPv4 pool    = upper /25 of the subnet (e.g. 10.171.2.128/25)
-      IPv6 subnet  = fd<gg>:<gggg>:<gggggg>:<VpnVnetId>00::/64
+      IPv6 subnet  = fd<gg>:<gggg>:<gggg>:<VpnVnetId>00::/64
       IPv6 pool    = ::1000/116 inside the subnet (4096 addresses)
 
   EAP PASSWORD
@@ -68,15 +44,14 @@
   secrets.conf` on the VM (root-read-only). Treat shell history accordingly.
 
   CONVENTIONS
-  Follows the Azure CAF naming and tagging conventions used elsewhere in this
-  repo, and the project script conventions in `AGENTS.md`.
+  Follows the Azure CAF naming and tagging conventions.
 
 .EXAMPLE
 
   az login
   az account set --subscription <subscription id>
   $VerbosePreference = 'Continue'
-  $env:DEPLOY_VPN_USER_PASSWORD = 'replace-me'
+  $env:DEPLOY_VPN_USER_PASSWORD = 'P@ssword01'
   ./b-shared/06-Deploy-StrongSwanVm.ps1
 #>
 [CmdletBinding()]
@@ -96,7 +71,7 @@ param (
     ## VM size. Default matches the project's dev-tier sizing.
     [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_D2s_v6',
     ## Linux admin account name (authentication via SSH key).
-    [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'admin',
+    [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser',
     ## Two-character VPN vnet id (addressing slot, not an Azure VNet).
     [string]$VpnVnetId = $ENV:DEPLOY_VPN_VNET_ID ?? '02',
     ## Ten-character IPv6 ULA Global ID (MUST match the gateway-subnet script).
@@ -121,7 +96,7 @@ $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))"
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 $VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_D2s_v6'
-$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'admin'
+$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser'
 $VpnUsername = $ENV:DEPLOY_VPN_USERNAME ?? 'vpnuser'
 $VpnUserPassword = $ENV:DEPLOY_VPN_USER_PASSWORD
 $VpnVnetId = $ENV:DEPLOY_VPN_VNET_ID ?? '02'
@@ -141,11 +116,7 @@ if ([string]::IsNullOrWhiteSpace($VpnUserPassword)) {
 $SubscriptionId = $(az account show --query id --output tsv)
 Write-Verbose "Deploying strongSwan VM for environment '$Environment' in subscription '$SubscriptionId'$($AddPublicIpv4 ? ' with IPv4' : '')"
 
-# ---------------------------------------------------------------------------
 # Resolve the shared RG, VNet, gateway subnet, gateway NSG, Key Vault.
-# We READ all of these; we never create them.
-# ---------------------------------------------------------------------------
-
 $rgName            = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $rg                = az group show --name $rgName 2>$null | ConvertFrom-Json
 if (-not $rg) { throw "Resource group '$rgName' not found. Run a-infrastructure scripts first." }
@@ -169,11 +140,7 @@ $kvName  = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 $kv      = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
 if (-not $kv) { throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first." }
 
-# Resolve the shared VPN user-assigned managed identity. It is created and
-# granted Key Vault access by the VPN-identity script; this script only
-# binds it to the VM. Pre-provisioning the identity (rather than using a
-# system-assigned MI created alongside the VM) decouples permissions from
-# VM lifecycle and eliminates any permission-propagation race on first boot.
+# Resolve the shared VPN user-assigned managed identity.
 $identityName = "id-$Purpose-strongswan-$Environment-$Instance".ToLowerInvariant()
 $identity     = az identity show --name $identityName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $identity) {
@@ -186,10 +153,7 @@ if (-not $uamiResourceId -or -not $uamiClientId) {
 }
 Write-Verbose "Resolved shared resources: RG=$rgName, VNet=$vnetName, Subnet=$gatewaySubnetName, NSG=$gatewayNsgName, KV=$kvName, UAMI=$identityName"
 
-# ---------------------------------------------------------------------------
 # Derived names and addressing.
-# ---------------------------------------------------------------------------
-
 $appName   = 'strongswan'
 $vmName    = "vm$appName$Instance".ToLowerInvariant()
 $vmOsDisk  = "osdiskvm$appName$Instance".ToLowerInvariant()
@@ -205,37 +169,30 @@ if (-not $ServerDnsLabel) {
 $pipV6DnsLabel = $ServerDnsLabel.ToLowerInvariant()
 $pipV4DnsLabel = "$ServerDnsLabel-ipv4".ToLowerInvariant()
 
-# --- Reusable snippet: derive IPv6 / IPv4 PIP FQDNs from parameters ---------
-# NOTE: Duplicated in the certificate-deployment script; keep the two copies
-# in sync. See AGENTS.md on "do not extract to a module".
+# Derive IPv6 / IPv4 PIP FQDNs from parameters
 $ipv6Fqdn = "$pipV6DnsLabel.$locationLower.cloudapp.azure.com"
 $ipv4Fqdn = "$pipV4DnsLabel.$locationLower.cloudapp.azure.com"
 $fqdnList = @($ipv6Fqdn)
 if ($AddPublicIpv4) { $fqdnList += $ipv4Fqdn }
 Write-Verbose "Server FQDNs: $($fqdnList -join ', ')"
-# ---------------------------------------------------------------------------
 
-# --- Reusable snippet: VPN client pool addressing ---------------------------
-# NOTE: This snippet is the canonical source for the pool derivation; the
-# substituted values flow into cloud-init. See D5 in design.md and the
-# vpn-gateway spec's "VPN client virtual IP pool" requirement.
-#
-# UlaGlobalId = gg gggg gggggg (10 hex chars). VpnVnetId is 2 hex chars.
-$ulaGg       = $UlaGlobalId.Substring(0, 2)          # first byte, hex
-$ulaGgggg    = $UlaGlobalId.Substring(2, 4)          # next 4 hex
-$ulaTail     = $UlaGlobalId.Substring(6, 4)          # last 4 hex
-$ulaGgDec    = [int]"0x$ulaGg"
-$vpnVnetDec  = [int]"0x$VpnVnetId"
+# VPN client pool addressing
+# The substituted values flow into cloud-init.
+# UlaGlobalId = gg gggg gggg (10 hex chars). VpnVnetId is 2 hex chars.
+$prefix = "fd$($UlaGlobalId.Substring(0, 2)):$($UlaGlobalId.Substring(2, 4)):$($UlaGlobalId.Substring(6))"
+
+# IPv6 subnet: fd<gg>:<gggg>:<gggg>:<VpnVnetId>00::/64
+$vnetAddress = [IPAddress]"$($prefix):$($VnetId)00::"
+$vpnSubnetIPv6 = "$vnetAddress" + '::/64'
+# IPv6 pool: /116 at ::1000 inside the /64.
+$vipPoolIPv6   = "$vnetAddress" + '::1000/116'
 
 # IPv4: 10.<ggDec>.<vpnVnetDec>.0/24 ; pool = upper half /25 at .128.
-$vpnSubnetIPv4 = "10.$ulaGgDec.$vpnVnetDec.0/24"
-$vipPoolIPv4   = "10.$ulaGgDec.$vpnVnetDec.128/25"
+$prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
+$vpnVnetDec  = [int]"0x$VpnVnetId"
+$vpnSubnetIPv4 = "10.$prefixByte.$vpnVnetDec.0/24"
+$vipPoolIPv4   = "10.$prefixByte.$vpnVnetDec.128/25"
 
-# IPv6 subnet: fd<gg>:<gggg>:<gggggg>:<VpnVnetId>00::/64
-$ipv6Prefix    = "fd$($ulaGg):$($ulaGgggg):$($ulaTail):$($VpnVnetId)00"
-$vpnSubnetIPv6 = "$ipv6Prefix" + '::/64'
-# IPv6 pool: /116 at ::1000 inside the /64.
-$vipPoolIPv6   = "$ipv6Prefix" + '::1000/116'
 Write-Verbose "VPN subnets: IPv4=$vpnSubnetIPv4, IPv6=$vpnSubnetIPv6"
 Write-Verbose "VPN pools  : IPv4=$vipPoolIPv4, IPv6=$vipPoolIPv6"
 # ---------------------------------------------------------------------------
@@ -258,10 +215,7 @@ foreach ($name in @($caSecretName, $serverCertSecretName, $serverKeySecretName))
     Write-Verbose "  OK: $name"
 }
 
-# ---------------------------------------------------------------------------
 # Tag dictionary matching the gateway-subnet script's style.
-# ---------------------------------------------------------------------------
-
 $TagDictionary = [ordered]@{
     DataClassification = 'Non-business'
     Criticality        = 'Low'
@@ -271,10 +225,7 @@ $TagDictionary = [ordered]@{
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }
 
-# ---------------------------------------------------------------------------
-# 10. NSG rules: AllowIKE (2100, UDP 500), AllowIPsecNatT (2101, UDP 4500).
-# ---------------------------------------------------------------------------
-
+# NSG rules: AllowIKE (2100, UDP 500), AllowIPsecNatT (2101, UDP 4500).
 function Add-NsgRuleIfAbsent {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -307,10 +258,7 @@ Add-NsgRuleIfAbsent -Name 'AllowIPsecNatT'  -Priority 2101 -DestPort '4500'
 Write-Verbose "NSG rules on ${gatewayNsgName}:"
 az network nsg rule list --nsg-name $gatewayNsgName -g $rgName --query "[?name=='AllowIKE' || name=='AllowIPsecNatT'].{name:name,priority:priority,protocol:protocol,dest:destinationPortRange}" --output tsv | ForEach-Object { Write-Verbose "  $_" }
 
-# ---------------------------------------------------------------------------
-# 11. Public IPs + NIC (idempotent).
-# ---------------------------------------------------------------------------
-
+# Public IPs + NIC (idempotent).
 function Ensure-PublicIp {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -377,10 +325,7 @@ Write-Verbose "Ensuring --ip-forwarding=true on NIC '$nicName'"
 az network nic update --name $nicName --resource-group $rgName --ip-forwarding true --output none
 if ($LASTEXITCODE -ne 0) { throw "az network nic update --ip-forwarding failed." }
 
-# ---------------------------------------------------------------------------
-# 12. Render cloud-init.
-# ---------------------------------------------------------------------------
-
+# Render cloud-init.
 $tempDir = Join-Path $PSScriptRoot 'temp'
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 $tempDir = (Resolve-Path $tempDir).ProviderPath
@@ -419,23 +364,20 @@ if ($leftover.Count -gt 0) {
 }
 Write-Verbose "Rendered cloud-init passed token-substitution check."
 
-# ---------------------------------------------------------------------------
-# 13. VM create + user-assigned managed identity binding + auto-shutdown.
-# ---------------------------------------------------------------------------
-# The VM is bound to the shared user-assigned managed identity
-# `$identityName`. Key Vault access for that identity is pre-provisioned by
-# the VPN-identity script (access-policy entry, since the vault runs in
-# access-policy mode). This script does not manage Key Vault permissions.
+# VM create + user-assigned managed identity binding + auto-shutdown.
 
 $vm = az vm show --name $vmName -g $rgName 2>$null | ConvertFrom-Json
 if (-not $vm) {
-    Write-Verbose "Creating VM '$vmName' (size $VmSize, image UbuntuLTS, UAMI '$identityName')"
+    # Image: Canonical Ubuntu 22.04 LTS (Jammy), Gen2. The legacy `UbuntuLTS`
+    # alias was retired by Azure CLI in 2023; use the explicit URN.
+    $vmImage = 'Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest'
+    Write-Verbose "Creating VM '$vmName' (size $VmSize, image $vmImage, UAMI '$identityName')"
     az vm create `
         --resource-group $rgName `
         --name $vmName `
         --location $location `
         --size $VmSize `
-        --image UbuntuLTS `
+        --image $vmImage `
         --os-disk-name $vmOsDisk `
         --admin-username $AdminUsername `
         --generate-ssh-keys `
@@ -447,11 +389,6 @@ if (-not $vm) {
     if ($LASTEXITCODE -ne 0) { throw "az vm create '$vmName' failed." }
 } else {
     Write-Verbose "VM '$vmName' already present, skipping create."
-    # Ensure the UAMI is attached to the existing VM (no-op if already attached).
-    # Note: any pre-existing system-assigned identity on the VM is left
-    # untouched; it has no Key Vault access so is harmless.
-    az vm identity assign --name $vmName --resource-group $rgName --identities $uamiResourceId --output none
-    if ($LASTEXITCODE -ne 0) { throw "az vm identity assign failed." }
 }
 
 if ($ShutdownUtc) {
@@ -464,10 +401,7 @@ if ($ShutdownUtc) {
     if ($LASTEXITCODE -ne 0) { throw "az vm auto-shutdown failed." }
 }
 
-# ---------------------------------------------------------------------------
-# 14. Post-deploy verification + operator output.
-# ---------------------------------------------------------------------------
-
+# Post-deploy verification + operator output.
 Write-Verbose "Waiting for cloud-init to finish on '$vmName' (this can take several minutes on first boot)..."
 $ciRaw = az vm run-command invoke `
     --resource-group $rgName `
@@ -481,7 +415,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "cloud-init did not reach 'done' on '$vmName'."
 }
 $ciParsed = $ciRaw | ConvertFrom-Json -ErrorAction SilentlyContinue
-$ciStdout = ($ciParsed.value | Where-Object { $_.code -eq 'ComponentStatus/StdOut/succeeded' } | Select-Object -First 1).message
+# Azure CLI run-command output shapes vary by CLI version:
+# Accept either: grab every `message` field and match against the sentinel.
+$ciStdout = ($ciParsed.value | ForEach-Object { $_.message }) -join "`n"
 if (-not ($ciStdout -and ($ciStdout -match 'CLOUD_INIT_DONE'))) {
     Write-Warning "cloud-init status did not return 'done'; fetching /var/log/cloud-init-output.log for context..."
     az vm run-command invoke `
@@ -495,29 +431,18 @@ if (-not ($ciStdout -and ($ciStdout -match 'CLOUD_INIT_DONE'))) {
 Write-Verbose "cloud-init reported 'done'."
 
 # Summary output.
-Write-Output ""
-Write-Output "strongSwan VPN VM deployed:"
-Write-Output "  VM name        : $vmName"
-Write-Output "  IPv6 FQDN      : $ipv6Fqdn"
+Write-Verbose "strongSwan VPN VM deployed:"
+Write-Verbose "  VM name        : $vmName"
+Write-Verbose "  IPv6 FQDN      : $ipv6Fqdn"
 if ($AddPublicIpv4) {
-    Write-Output "  IPv4 FQDN      : $ipv4Fqdn"
+    Write-Verbose "  IPv4 FQDN      : $ipv4Fqdn"
 }
 $pipV6 = az network public-ip show --name $pipV6Name -g $rgName --query ipAddress --output tsv
-Write-Output "  IPv6 address   : $pipV6"
+Write-Verbose "  IPv6 address   : $pipV6"
 if ($AddPublicIpv4) {
     $pipV4 = az network public-ip show --name $pipV4Name -g $rgName --query ipAddress --output tsv
-    Write-Output "  IPv4 address   : $pipV4"
+    Write-Verbose "  IPv4 address   : $pipV4"
 }
-Write-Output "  Key Vault      : $kvName"
-Write-Output "  Secrets        :"
-Write-Output "    CA cert                 : $caSecretName"
-Write-Output "    Server cert             : $serverCertSecretName"
-Write-Output "    Server key              : $serverKeySecretName"
-Write-Output "    Client 001 PKCS#12      : $clientP12SecretName (base64)"
-Write-Output "    Client 001 P12 password : $clientP12PwdSecretName"
-Write-Output ""
-Write-Output "Download the initial client bundle for a dev machine:"
-Write-Output "  az keyvault secret show --vault-name $kvName --name $clientP12SecretName --query value -o tsv | base64 -d > strongswan-client-001.p12"
-Write-Output "  az keyvault secret show --vault-name $kvName --name $clientP12PwdSecretName --query value -o tsv > strongswan-client-001.p12.pwd"
-Write-Output ""
-Write-Output "Deployment complete."
+Write-Verbose "Download the initial client bundle for a dev machine:"
+Write-Verbose "  az keyvault secret show --vault-name $kvName --name $clientP12SecretName --query value -o tsv | base64 -d > strongswan-client-001.p12"
+Write-Verbose "  az keyvault secret show --vault-name $kvName --name $clientP12PwdSecretName --query value -o tsv > strongswan-client-001.p12.pwd"
