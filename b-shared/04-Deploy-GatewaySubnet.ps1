@@ -46,7 +46,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./01-init-core-rg.ps1
+   ./04-Deploy-GatewaySubnet.ps1
 #>
 [CmdletBinding()]
 param (

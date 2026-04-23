@@ -11,7 +11,8 @@
     * Initial client bundle   -- strongswan-client-001.key / .pem / .p12    (RSA 4096, 1yr)
     * PKCS#12 password        -- strongswan-client-001-p12-password.txt
 
-  Then uploads the following to the shared Key Vault from `02-Deploy-KeyVault.ps1`:
+  Then uploads the following to the shared Key Vault from the Key Vault
+  deployment script:
 
     * strongswan-<env>-ca-cert                  (application/x-pem-file)
     * strongswan-<env>-server-cert              (application/x-pem-file)
@@ -20,8 +21,8 @@
     * strongswan-<env>-client-001-p12-password  (no content-type)
 
   The CA *private* key (strongswan-ca.key) is NEVER uploaded. It stays only in
-  `./temp/` on the operator machine, so only whoever ran `04` can issue new
-  client certs.
+  `./temp/` on the operator machine, so only whoever ran this script can issue
+  new client certs.
 
   Generation and upload are independently idempotent: each step checks for
   existing output (on disk or in Key Vault) and is skipped if present. A forced
@@ -30,16 +31,17 @@
 
 .NOTES
   PREREQUISITES
-  * `02-Deploy-KeyVault.ps1` must have run (this script uploads to the vault it
-    created).
+  * The Key Vault deployment script in this folder must have run (this script
+    uploads to the vault it created).
   * The devcontainer must be rebuilt after merging this change so that `pki`
     (from `strongswan-pki`) and `openssl` are on PATH. Running `which pki` and
     `which openssl` should both succeed before running this script.
 
-  PAIRS WITH 06-Deploy-StrongSwanVm.ps1
-  `05` generates the server cert with subjectAltName DNS entries that match the
-  public FQDNs that `06` will assign to the VM. That only works if both scripts
-  compute the same FQDNs from the same parameters. The FQDNs are deterministic:
+  PAIRS WITH THE STRONGSWAN VM DEPLOYMENT SCRIPT
+  This script generates the server cert with subjectAltName DNS entries that
+  match the public FQDNs the VM-deployment script will assign to the VM.
+  That only works if both scripts compute the same FQDNs from the same
+  parameters. The FQDNs are deterministic:
 
       IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
       IPv4 FQDN = "strongswan-<OrgId>-<Environment>-ipv4.<Location>.cloudapp.azure.com"
@@ -49,9 +51,10 @@
                       (default: first 4 hex chars of the subscription id,
                        prefixed with "0x").
     * `<Environment>` comes from `-Environment` / `DEPLOY_ENVIRONMENT`.
-    * `<Location>`    on `05` is `-Location` / `DEPLOY_LOCATION` (default
-                      `australiaeast`); on `06` it is taken from the RG's
-                      location, which must match the `05` value.
+    * `<Location>`    here is `-Location` / `DEPLOY_LOCATION` (default
+                      `australiaeast`); on the VM-deployment script it is
+                      taken from the RG's location, which must match this
+                      value.
 
   If any of `-OrgId`, `-Environment`, `-Location`, or `-AddPublicIpv4` differ
   between the two runs, the server cert SANs won't match the VM's FQDNs and
@@ -72,7 +75,7 @@
 #>
 [CmdletBinding()]
 param (
-    ## Purpose prefix (matches `02-Deploy-KeyVault.ps1`).
+    ## Purpose prefix (matches the Key Vault deployment script).
     [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
     ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
@@ -80,7 +83,7 @@ param (
     [string]$OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))",
     ## Azure location whose cloudapp.azure.com subdomain the VM FQDNs use.
     [string]$Location = $ENV:DEPLOY_LOCATION ?? 'australiaeast',
-    ## Instance number uniquifier for the Key Vault (matches `02-Deploy-KeyVault.ps1`).
+    ## Instance number uniquifier for the Key Vault (matches the Key Vault deployment script).
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
     ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4").
     [string]$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL,
@@ -115,7 +118,7 @@ Write-Verbose "Generating strongSwan cert material for environment '$Environment
 # Derived names and paths
 # ---------------------------------------------------------------------------
 
-# Key Vault name: must match `02-Deploy-KeyVault.ps1`.
+# Key Vault name: must match the Key Vault deployment script.
 $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 Write-Verbose "Target Key Vault: $kvName"
 
@@ -329,7 +332,7 @@ else {
 Write-Verbose "Looking up Key Vault $kvName"
 $kv = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
 if (-not $kv) {
-    throw "Key Vault '$kvName' not found. Run `b-shared/02-Deploy-KeyVault.ps1` first (ensure matching -Purpose/-Environment/-OrgId/-Instance)."
+    throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first (ensure matching -Purpose/-Environment/-OrgId/-Instance)."
 }
 
 # Helper: upload a file as a Key Vault secret iff the name has no current value.
@@ -417,4 +420,4 @@ Write-Output "  Server key         : $serverKeySecretName"
 Write-Output "  Client 001 PKCS#12 : $clientP12SecretName (base64)"
 Write-Output "  Client 001 P12 pwd : $clientP12PwdSecretName"
 Write-Output ""
-Write-Output "Next: run ./b-shared/06-Deploy-StrongSwanVm.ps1 -VpnUserPassword <pwd>"
+Write-Output "Next: run the strongSwan VM deployment script with -VpnUserPassword <pwd>"

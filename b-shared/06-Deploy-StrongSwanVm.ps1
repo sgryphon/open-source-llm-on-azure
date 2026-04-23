@@ -12,16 +12,16 @@
     * One NIC with a primary IPv4 ip-config + a secondary IPv6 ip-config,
       attached to the gateway subnet, with Azure-level IP forwarding enabled.
     * One Ubuntu LTS VM bound to the shared user-assigned managed identity
-      `id-<Purpose>-strongswan-<Environment>-<Instance>` (created by
-      `03-Deploy-VpnIdentity.ps1`) and a rendered cloud-init payload from
+      `id-<Purpose>-strongswan-<Environment>-<Instance>` (created by an
+      earlier VPN-identity script) and a rendered cloud-init payload from
       `data/strongswan-cloud-init.txt`.
     * An optional auto-shutdown schedule.
 
   The VM's managed identity is granted `get, list` on the shared Key Vault's
-  secrets by `03-Deploy-VpnIdentity.ps1` (via Key Vault access policy, not
-  RBAC -- see `02-Deploy-KeyVault.ps1` for the mode rationale). This script
-  therefore does not manage Key Vault permissions; it only consumes the
-  pre-provisioned identity.
+  secrets by the earlier VPN-identity script (via Key Vault access policy,
+  not RBAC -- the vault runs in access-policy mode). This script therefore
+  does not manage Key Vault permissions; it only consumes the pre-provisioned
+  identity.
 
   The rendered cloud-init file pulls the CA cert, server cert, and server
   private key from Key Vault at first boot and brings up the strongSwan
@@ -30,29 +30,30 @@
 
 .NOTES
   PREREQUISITES
-  * `01-Deploy-AzureMonitor.ps1`, `02-Deploy-KeyVault.ps1`,
-    `03-Deploy-VpnIdentity.ps1`, and `04-Deploy-GatewaySubnet.ps1` must have
-    run for this environment.
-  * `05-Deploy-Certificate.ps1` must have run; this script fails early if the
-    CA/server/server-key secrets are missing in Key Vault.
+  * The shared Azure Monitor, Key Vault, VPN identity, and gateway-subnet
+    scripts in this folder must have run for this environment.
+  * The certificate-deployment script in this folder must have run; this
+    script fails early if the CA/server/server-key secrets are missing in
+    Key Vault.
 
-  PAIRS WITH 05-Deploy-Certificate.ps1
-  The server cert SANs are issued by `05` from the same deterministic FQDN
+  PAIRS WITH THE CERTIFICATE-DEPLOYMENT SCRIPT
+  The server cert SANs are issued from the same deterministic FQDN
   formulas. `-OrgId`, `-Environment`, `-Location` (via RG), and
-  `-AddPublicIpv4` MUST match the values used when `05` ran. Exporting the
-  matching `DEPLOY_*` env vars once and running both scripts in the same
-  shell is the recommended workflow.
+  `-AddPublicIpv4` MUST match the values used when the certificate script
+  ran. Exporting the matching `DEPLOY_*` env vars once and running both
+  scripts in the same shell is the recommended workflow.
 
       IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
       IPv4 FQDN = "strongswan-<OrgId>-<Environment>-ipv4.<Location>.cloudapp.azure.com"
 
-  `<Location>` is derived here from the core RG's location; `05` takes it as
-  an explicit parameter with `australiaeast` as the default.
+  `<Location>` is derived here from the core RG's location; the certificate
+  script takes it as an explicit parameter with `australiaeast` as the
+  default.
 
   VPN CLIENT POOL ADDRESSING
   The VPN client IP pool is a pure strongSwan construct (no Azure VNet /
   subnet is created for it). Addresses are derived deterministically from
-  `-UlaGlobalId` (the same hash used by `04-Deploy-GatewaySubnet.ps1`) and
+  `-UlaGlobalId` (the same hash used by the gateway-subnet script) and
   `-VpnVnetId` (default `02`). For a ULA Global ID decomposed as
   `gg gggg gggggg`:
 
@@ -84,7 +85,7 @@ param (
     [string]$VpnUserPassword = $ENV:DEPLOY_VPN_USER_PASSWORD,
     ## EAP-MSCHAPv2 username seeded into swanctl secrets.
     [string]$VpnUsername = $ENV:DEPLOY_VPN_USERNAME ?? 'vpnuser',
-    ## Purpose prefix (matches `02-Deploy-KeyVault.ps1` / `04-Deploy-GatewaySubnet.ps1`).
+    ## Purpose prefix (matches the shared Key Vault / gateway-subnet scripts).
     [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
     ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
@@ -98,15 +99,15 @@ param (
     [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'admin',
     ## Two-character VPN vnet id (addressing slot, not an Azure VNet).
     [string]$VpnVnetId = $ENV:DEPLOY_VPN_VNET_ID ?? '02',
-    ## Ten-character IPv6 ULA Global ID (MUST match `04-Deploy-GatewaySubnet.ps1`).
+    ## Ten-character IPv6 ULA Global ID (MUST match the gateway-subnet script).
     [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
-    ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4"). Must match `04`.
+    ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4"). Must match the gateway-subnet script.
     [string]$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL,
     ## Auto-shutdown time in UTC, default 0900 = 19:00 in Brisbane. Empty string disables.
     [string]$ShutdownUtc = $ENV:DEPLOY_SHUTDOWN_UTC ?? '0900',
     ## Email to send auto-shutdown notification to (optional).
     [string]$ShutdownEmail = $ENV:DEPLOY_SHUTDOWN_EMAIL ?? '',
-    ## Add a public IPv4 in addition to the IPv6. MUST match the `04` run.
+    ## Add a public IPv4 in addition to the IPv6. MUST match the gateway-subnet run.
     [switch]$AddPublicIpv4 = ([string]::IsNullOrEmpty($ENV:DEPLOY_ADD_IPV4) -or $ENV:DEPLOY_ADD_IPV4 -eq 'true' -or $ENV:DEPLOY_ADD_IPV4 -eq '1')
 )
 
@@ -156,27 +157,27 @@ $gatewayNsgName    = "nsg-$Purpose-gateway-$Environment-001".ToLowerInvariant()
 $gatewaySubnetName = "snet-$Purpose-gateway-$Environment-$location-001".ToLowerInvariant()
 
 $vnet    = az network vnet show --name $vnetName --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $vnet) { throw "VNet '$vnetName' not found. Run `a-infrastructure/01-*.ps1` first." }
+if (-not $vnet) { throw "VNet '$vnetName' not found. Run the core-RG initialization script first." }
 
 $gwSnet  = az network vnet subnet show --name $gatewaySubnetName -g $rgName --vnet-name $vnetName 2>$null | ConvertFrom-Json
-if (-not $gwSnet) { throw "Gateway subnet '$gatewaySubnetName' not found. Run `b-shared/04-Deploy-GatewaySubnet.ps1` first." }
+if (-not $gwSnet) { throw "Gateway subnet '$gatewaySubnetName' not found. Run the gateway-subnet script first." }
 
 $gwNsg   = az network nsg show --name $gatewayNsgName -g $rgName 2>$null | ConvertFrom-Json
-if (-not $gwNsg) { throw "Gateway NSG '$gatewayNsgName' not found. Run `b-shared/04-Deploy-GatewaySubnet.ps1` first." }
+if (-not $gwNsg) { throw "Gateway NSG '$gatewayNsgName' not found. Run the gateway-subnet script first." }
 
 $kvName  = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 $kv      = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
-if (-not $kv) { throw "Key Vault '$kvName' not found. Run `b-shared/02-Deploy-KeyVault.ps1` first." }
+if (-not $kv) { throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first." }
 
 # Resolve the shared VPN user-assigned managed identity. It is created and
-# granted Key Vault access by `03-Deploy-VpnIdentity.ps1`; this script only
+# granted Key Vault access by the VPN-identity script; this script only
 # binds it to the VM. Pre-provisioning the identity (rather than using a
 # system-assigned MI created alongside the VM) decouples permissions from
 # VM lifecycle and eliminates any permission-propagation race on first boot.
 $identityName = "id-$Purpose-strongswan-$Environment-$Instance".ToLowerInvariant()
 $identity     = az identity show --name $identityName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $identity) {
-    throw "Managed identity '$identityName' not found. Run `b-shared/03-Deploy-VpnIdentity.ps1` first."
+    throw "Managed identity '$identityName' not found. Run the VPN-identity script first."
 }
 $uamiResourceId = $identity.id
 $uamiClientId   = $identity.clientId
@@ -205,8 +206,8 @@ $pipV6DnsLabel = $ServerDnsLabel.ToLowerInvariant()
 $pipV4DnsLabel = "$ServerDnsLabel-ipv4".ToLowerInvariant()
 
 # --- Reusable snippet: derive IPv6 / IPv4 PIP FQDNs from parameters ---------
-# NOTE: Duplicated in `05-Deploy-Certificate.ps1`; keep the two copies in
-# sync. See AGENTS.md on "do not extract to a module".
+# NOTE: Duplicated in the certificate-deployment script; keep the two copies
+# in sync. See AGENTS.md on "do not extract to a module".
 $ipv6Fqdn = "$pipV6DnsLabel.$locationLower.cloudapp.azure.com"
 $ipv4Fqdn = "$pipV4DnsLabel.$locationLower.cloudapp.azure.com"
 $fqdnList = @($ipv6Fqdn)
@@ -239,7 +240,7 @@ Write-Verbose "VPN subnets: IPv4=$vpnSubnetIPv4, IPv6=$vpnSubnetIPv6"
 Write-Verbose "VPN pools  : IPv4=$vipPoolIPv4, IPv6=$vipPoolIPv6"
 # ---------------------------------------------------------------------------
 
-# Secret names must match those written by `05-Deploy-Certificate.ps1`.
+# Secret names must match those written by the certificate-deployment script.
 $envLower              = $Environment.ToLowerInvariant()
 $secretPrefix          = "strongswan-$envLower"
 $caSecretName          = "$secretPrefix-ca-cert"
@@ -248,17 +249,17 @@ $serverKeySecretName   = "$secretPrefix-server-key"
 $clientP12SecretName   = "$secretPrefix-client-001-p12"
 $clientP12PwdSecretName= "$secretPrefix-client-001-p12-password"
 
-Write-Verbose "Verifying Key Vault secrets from 05-Deploy-Certificate.ps1 ..."
+Write-Verbose "Verifying Key Vault secrets from the certificate-deployment script ..."
 foreach ($name in @($caSecretName, $serverCertSecretName, $serverKeySecretName)) {
     $s = az keyvault secret show --vault-name $kvName --name $name 2>$null | ConvertFrom-Json
     if (-not ($s -and $s.value)) {
-        throw "Key Vault secret '$name' is missing in '$kvName'. Run `b-shared/05-Deploy-Certificate.ps1` first."
+        throw "Key Vault secret '$name' is missing in '$kvName'. Run the certificate-deployment script first."
     }
     Write-Verbose "  OK: $name"
 }
 
 # ---------------------------------------------------------------------------
-# Tag dictionary matching 04-Deploy-GatewaySubnet.ps1's style.
+# Tag dictionary matching the gateway-subnet script's style.
 # ---------------------------------------------------------------------------
 
 $TagDictionary = [ordered]@{
@@ -423,9 +424,8 @@ Write-Verbose "Rendered cloud-init passed token-substitution check."
 # ---------------------------------------------------------------------------
 # The VM is bound to the shared user-assigned managed identity
 # `$identityName`. Key Vault access for that identity is pre-provisioned by
-# `03-Deploy-VpnIdentity.ps1` (access-policy entry, since the vault runs in
-# access-policy mode -- see `02-Deploy-KeyVault.ps1`). This script does not
-# manage Key Vault permissions.
+# the VPN-identity script (access-policy entry, since the vault runs in
+# access-policy mode). This script does not manage Key Vault permissions.
 
 $vm = az vm show --name $vmName -g $rgName 2>$null | ConvertFrom-Json
 if (-not $vm) {

@@ -30,7 +30,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./01-Deploy-KeyVault.ps1
+   ./02-Deploy-KeyVault.ps1
 #>
 [CmdletBinding()]
 param (

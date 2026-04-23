@@ -12,22 +12,23 @@
       `get, list` on secrets (matches what `Key Vault Secrets User` grants
       in RBAC mode).
 
-  The identity is consumed by `06-Deploy-StrongSwanVm.ps1`, which binds it to
-  the VM via `az vm create --assign-identity <resource-id>`. Keeping the
-  identity lifecycle independent of the VM lifecycle means permissions can
-  be (re-)asserted before the VM exists, eliminating any cloud-init race
-  against permission propagation and allowing VM rebuilds without touching
-  Key Vault permissions.
+  The identity is consumed by the strongSwan VM deployment script, which
+  binds it to the VM via `az vm create --assign-identity <resource-id>`.
+  Keeping the identity lifecycle independent of the VM lifecycle means
+  permissions can be (re-)asserted before the VM exists, eliminating any
+  cloud-init race against permission propagation and allowing VM rebuilds
+  without touching Key Vault permissions.
 
 .NOTES
   PREREQUISITES
-  * `02-Deploy-KeyVault.ps1` must have run for the same parameter set; this
-    script writes an access-policy entry to that vault.
+  * The Key Vault deployment script in this folder must have run for the
+    same parameter set; this script writes an access-policy entry to that
+    vault.
 
   KEY VAULT MODE
   The shared Key Vault is provisioned in access-policy mode (not RBAC mode)
-  by `02-Deploy-KeyVault.ps1` because the PoC/demo runs under Contributor,
-  which lacks `Microsoft.Authorization/roleAssignments/write`. Granting via
+  because the PoC/demo runs under Contributor, which lacks
+  `Microsoft.Authorization/roleAssignments/write`. Granting via
   `az keyvault set-policy` is a management-plane write on the vault that
   Contributor has; this keeps the deployment self-sufficient.
 
@@ -54,13 +55,13 @@
 #>
 [CmdletBinding()]
 param (
-    ## Purpose prefix (matches `02-Deploy-KeyVault.ps1`).
+    ## Purpose prefix (matches the Key Vault deployment script).
     [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
     ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
     ## Identifier for the organisation (or subscription) to make global names unique.
     [string]$OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))",
-    ## Instance number uniquifier (matches `02-Deploy-KeyVault.ps1`).
+    ## Instance number uniquifier (matches the Key Vault deployment script).
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 )
 
@@ -89,11 +90,11 @@ $kvName       = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 
 # Resolve RG (must already exist) to get location for the identity resource.
 $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
-if (-not $rg) { throw "Resource group '$rgName' not found. Run a-infrastructure scripts first." }
+if (-not $rg) { throw "Resource group '$rgName' not found. Run the infrastructure initialization scripts first." }
 
 # Confirm the shared Key Vault exists; we grant access to it.
 $kv = az keyvault show --name $kvName --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $kv) { throw "Key Vault '$kvName' not found. Run ``b-shared/02-Deploy-KeyVault.ps1`` first." }
+if (-not $kv) { throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first." }
 
 # Following standard tagging conventions from Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
