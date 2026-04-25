@@ -20,7 +20,10 @@
 			"ppa": true,
 			"version": "os-provided"
 		},
-        "ghcr.io/devcontainers/features/node:1": {}
+        "ghcr.io/devcontainers/features/node:1": {},
+        "ghcr.io/devcontainers-contrib/features/apt-packages:1": {
+            "packages": "openssl,strongswan-pki"
+        }
 	},
 
 	"postCreateCommand": "sudo chsh vscode -s \"$(which pwsh)\" && npm install -g opencode-ai && npm install -g @fission-ai/openspec@latest",

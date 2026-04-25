@@ -30,7 +30,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./01-Deploy-KeyVault.ps1
+   ./02-Deploy-KeyVault.ps1
 #>
 [CmdletBinding()]
 param (
@@ -88,10 +88,44 @@ $rg = az group show --name $rgName | ConvertFrom-Json
 
 Write-Verbose "Creating key vault $kvName"
 
-az keyvault create `
-  --resource-group $rgName `
-  -l $rg.location `
-  --name $kvName `
-  --tags $tags
+$existingVault = az keyvault show --name $kvName --resource-group $rgName 2>$null
+if ($LASTEXITCODE -eq 0 -and $existingVault) {
+    Write-Verbose "Key vault $kvName already exists; skipping create"
+} else {
+    # PoC/demo convenience: use access-policy mode (not RBAC mode), so that
+    # Contributor on the RG is sufficient to self-grant data-plane permissions.
+    # For production, flip to RBAC mode and assign 'Key Vault Secrets Officer'
+    # etc. via a deployment principal that has UAA pre-provisioned.
+
+    az keyvault create `
+      --resource-group $rgName `
+      -l $rg.location `
+      --name $kvName `
+      --enable-rbac-authorization false `
+      --tags $tags
+    if ($LASTEXITCODE -ne 0) { throw "az keyvault create failed for '$kvName'" }
+}
+
+$signedInUserObjectId = az ad signed-in-user show --query id --output tsv
+if ($LASTEXITCODE -ne 0 -or -not $signedInUserObjectId) {
+    throw "Unable to resolve signed-in user object id via 'az ad signed-in-user show'"
+}
+Write-Verbose "Granting signed-in user $signedInUserObjectId broad data-plane permissions on $kvName"
+
+$secretPerms = @('get','list','set','delete','recover','backup','restore','purge')
+$certPerms   = @('get','list','create','import','delete','update','managecontacts',
+                 'getissuers','listissuers','setissuers','deleteissuers','manageissuers',
+                 'recover','backup','restore','purge')
+$keyPerms    = @('get','list','create','import','delete','update','recover','backup','restore','purge',
+                 'encrypt','decrypt','sign','verify','wrapKey','unwrapKey')
+
+az keyvault set-policy `
+    --name $kvName `
+    --resource-group $rgName `
+    --object-id $signedInUserObjectId `
+    --secret-permissions @secretPerms `
+    --certificate-permissions @certPerms `
+    --key-permissions @keyPerms | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "az keyvault set-policy failed for '$kvName'" }
 
 Write-Verbose "Deploy Key Vault $kvName complete"

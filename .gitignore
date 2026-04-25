@@ -35,3 +35,9 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# Local scratch / secret material (generated keys, certs, rendered cloud-init, etc.).
+# Never commit anything from these directories — see AGENTS.md "Secrets and private material".
+temp/
+**/temp/
+
