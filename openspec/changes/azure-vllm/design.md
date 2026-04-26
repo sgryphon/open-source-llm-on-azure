@@ -7,7 +7,7 @@ This change introduces the first inference workload: a single-VM **vLLM** server
 Surrounding constraints:
 
 - The script style established by `02-Deploy-KeyVault.ps1`, `04-Deploy-GatewaySubnet.ps1`, and `06-Deploy-StrongSwanVm.ps1` (CAF naming, parameter + env-var fallback, `Write-Verbose`, `$ErrorActionPreference='Stop'`, Azure CLI only, idempotent `show`-then-`create`) must be preserved.
-- Addressing model from `core-infrastructure` (IPv6 ULA `fdgg:gggg:gggggg:vvss::/64` + IPv4 `10.<gg>.<vv>.<ss*32>/27` derived from `UlaGlobalId` and per-VNet/subnet IDs) is the project-wide pattern; the new subnet inside the workload VNet must conform.
+- Addressing model from `core-infrastructure` (IPv6 ULA `fdgg:gggg:gggg:vvss::/64` + IPv4 `10.<gg>.<vv>.<ss*32>/27` derived from `UlaGlobalId` and per-VNet/subnet IDs) is the project-wide pattern; the new subnet inside the workload VNet must conform.
 - The reference IoT project's `azure-mosquitto` pattern — Certbot HTTP-01 + native server TLS + cloud-init template substitution — is a known-good blueprint for "public IP, public DNS, Let's Encrypt, server-terminated TLS" and is being deliberately mirrored here.
 - The existing shared Key Vault (from `b-shared/02-Deploy-KeyVault.ps1`) is in **access-policy mode**, not RBAC; the same UAMI + access-policy pattern that `b-shared/03-Deploy-VpnIdentity.ps1` established is the natural fit.
 
@@ -21,7 +21,6 @@ Surrounding constraints:
 - Stage the model in Azure Storage so the VM doesn't depend on Hugging Face being reachable at boot time and so subsequent VM rebuilds are fast.
 - Pull all secret material (API key) and bulk material (model archive) from inside the tenant via the VM's user-assigned managed identity. Never embed secrets in cloud-init at substitution time.
 - Be re-runnable: every script must be idempotent. Re-running `Deploy-LlmVm.ps1` against an existing VM with unchanged parameters must be a no-op.
-- Keep the entire workload deletable via a single `91-Remove-Llm.ps1` script, leaving the workload RG/VNet (owned by `core-infrastructure`) intact.
 - Leave a clear seam for the future `llm-inference-gateway` capability (LiteLLM proxy + per-user keys + multi-model routing) to slot in front without rework.
 
 **Non-Goals:**
@@ -287,7 +286,6 @@ Context length: `--max-model-len 32768`. Qwen2.5-Coder-7B's training context is 
 | 05 | `05-Deploy-LlmPublicIp.ps1` | Static dual-stack PIPs with `cloudapp.azure.com` DNS labels |
 | 06 | `06-Deploy-LlmVm.ps1` | NIC, VM, NVIDIA extension, auto-shutdown, custom-data cloud-init |
 | 07 | `07-Test-LlmEndpoint.ps1` | `/v1/models` + tool-call smoke test |
-| 91 | `91-Remove-Llm.ps1` | Reverse-order teardown of resources created by 01-06 |
 | — | `Stop-LlmVm.ps1`, `Start-LlmVm.ps1`, `Rotate-LlmApiKey.ps1` | Operational utilities |
 
 `c-workload/data/vllm-cloud-init.txt` is the cloud-init template; runtime substitution writes `c-workload/temp/vllm-cloud-init.txt~` (gitignored).
@@ -450,8 +448,7 @@ This is the first workload in `c-workload/`; there is no prior version to migrat
    - `Stop-LlmVm.ps1` at end of day, `Start-LlmVm.ps1` next morning (or rely on auto-shutdown + manual start).
 6. Rollback / partial teardown:
    - To rotate the API key: `Rotate-LlmApiKey.ps1`. No VM rebuild.
-   - To rebuild the VM only: `91-Remove-Llm.ps1 -Scope Vm`, then `06-Deploy-LlmVm.ps1`. Storage/identity/secret/PIP/subnet preserved.
-   - Full LLM workload teardown: `91-Remove-Llm.ps1`. Workload RG + VNet remain (owned by `core-infrastructure`).
+   - Delete, then `06-Deploy-LlmVm.ps1`. Storage/identity/secret/PIP/subnet preserved.
 7. Future replacement (out of scope): introduce LiteLLM as a separate VM or container in front; switch the public DNS label to point at LiteLLM; vLLM moves to a private endpoint inside the VNet.
 
 ## Open Questions

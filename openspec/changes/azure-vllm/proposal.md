@@ -16,11 +16,9 @@ vLLM is chosen over Ollama because the project's near-term direction is multi-mo
 - **New** `c-workload/05-Deploy-LlmPublicIp.ps1` — creates a static dual-stack public IP set: one IPv6 (primary) and one IPv4, both Standard SKU, with DNS labels `llm-<orgid>-<env>` and `llm-<orgid>-<env>-ipv4` under `<location>.cloudapp.azure.com`. The DNS label is what Let's Encrypt issues against — no external DNS provider is involved. Idempotent.
 - **New** `c-workload/06-Deploy-LlmVm.ps1` — deploys the GPU VM (`Standard_NC4as_T4_v3`, Ubuntu 22.04 LTS) with the NVIDIA driver VM extension, binds the UAMI from script 04, attaches the public IPs from script 05, and passes a substituted cloud-init template (`c-workload/data/vllm-cloud-init.txt`) as `--custom-data`. Configures Azure auto-shutdown at a fixed UTC time. Idempotent.
 - **New** `c-workload/07-Test-LlmEndpoint.ps1` — smoke test that calls `GET /v1/models` and `POST /v1/chat/completions` (with a single `get_weather` tool definition) against the public HTTPS endpoint using the bearer token. Asserts a 200 response containing the served model name on the first call, and a `tool_calls` array on the second. Exits non-zero on any failure.
-- **New** `c-workload/91-Remove-Llm.ps1` — deletes the workload-RG resources created by this change in reverse order (VM, NIC, public IPs, NSG, subnet association, storage account, UAMI, Key Vault secret access policy entry, Key Vault secret). Uses `--yes` and tolerates already-removed resources.
 - **New** `c-workload/Stop-LlmVm.ps1` and `c-workload/Start-LlmVm.ps1` — convenience wrappers around `az vm deallocate` / `az vm start` for cost control between sessions.
 - **New** `c-workload/Rotate-LlmApiKey.ps1` — generates a fresh API key, updates the Key Vault secret, runs `az vm run-command invoke` to restart the `vllm` systemd unit so it picks up the new key from `/etc/vllm/vllm.env` (which is itself refreshed at boot from Key Vault — for in-place rotation between reboots, the run-command also rewrites `/etc/vllm/vllm.env`).
 - **New** `c-workload/data/vllm-cloud-init.txt` — cloud-init template containing placeholders `#INIT_HOST_NAME#`, `#INIT_API_KEY_SECRET_URI#`, `#INIT_MODEL_BLOB_URL#`, `#INIT_UAMI_CLIENT_ID#`, `#INIT_CERT_EMAIL#`, and `#INIT_ACME_STAGING_FLAG#`. Installs certbot, creates a `vllm` system user, sets up a Python venv, installs a pinned vLLM version, downloads the staged model archive from blob storage using the UAMI, fetches the API key from Key Vault using the UAMI, writes `/etc/vllm/vllm.env`, registers a `/etc/letsencrypt/renewal-hooks/deploy/10-vllm-restart.sh` deploy hook, requests the initial Let's Encrypt certificate via `certbot certonly --standalone --preferred-challenges http`, copies the cert into `/etc/vllm/certs/`, and starts a systemd unit `vllm.service` that runs `vllm serve` on `[::]:443` with `--ssl-certfile`, `--ssl-keyfile`, `--api-key`, `--model`, `--served-model-name`, `--tool-call-parser hermes`, `--enable-auto-tool-choice`, and `--max-model-len 32768`. Grants the venv's Python `cap_net_bind_service` so it can bind 443 without running as root.
-- **New** `c-workload/README.md` — documents prerequisites (T4 quota, completed `a-infrastructure` and `b-shared` deployments, model staged), run order, expected hostnames, OpenCode configuration snippet, troubleshooting (cloud-init log location, vLLM systemd unit), cost estimate, and teardown order.
 - **New** `docs/OpenCode-vllm-config.md` — copy-pasteable OpenCode provider configuration showing how to wire the deployed endpoint into `~/.config/opencode/opencode.json`.
 
 ## Capabilities
@@ -42,10 +40,8 @@ vLLM is chosen over Ollama because the project's near-term direction is multi-mo
   - `c-workload/05-Deploy-LlmPublicIp.ps1`
   - `c-workload/06-Deploy-LlmVm.ps1`
   - `c-workload/07-Test-LlmEndpoint.ps1`
-  - `c-workload/91-Remove-Llm.ps1`
   - `c-workload/Stop-LlmVm.ps1`, `c-workload/Start-LlmVm.ps1`, `c-workload/Rotate-LlmApiKey.ps1`
   - `c-workload/data/vllm-cloud-init.txt`
-  - `c-workload/README.md`
   - `docs/OpenCode-vllm-config.md`
 - **Devcontainer / tooling**: no new tooling required (Azure CLI + PowerShell already present); a Python venv is created on the operator's machine *only* by `00-Stage-Model.ps1` to use `huggingface-hub` and is torn down at the end of the script. The `temp/` ignore is already in `.gitignore` from the strongSwan change.
 - **Prerequisites**:
