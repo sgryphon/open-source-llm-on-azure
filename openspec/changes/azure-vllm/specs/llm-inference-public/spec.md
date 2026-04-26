@@ -69,7 +69,7 @@ with an environment-variable fallback and the specified default:
 |----------------|----------------------|------------------------------------------------------|
 | `-Environment` | `DEPLOY_ENVIRONMENT` | `Dev`                                                |
 | `-Location`    | `DEPLOY_LOCATION`    | `australiaeast`                                      |
-| `-OrgId`       | `DEPLOY_ORG_ID`      | `0x` + first 4 hex chars of the subscription id      |
+| `-OrgId`       | `DEPLOY_ORGID`       | `0x` + first 4 hex chars of the subscription id      |
 
 Scripts that need an ACME email SHALL additionally accept `-AcmeEmail` with
 fallback `DEPLOY_ACME_EMAIL` (no default; required for `06-Deploy-LlmVm.ps1`).
@@ -78,7 +78,7 @@ Scripts that need to opt into Let's Encrypt staging SHALL accept a switch
 
 #### Scenario: Default OrgId is derived from the current subscription
 
-- **GIVEN** `-OrgId` is not passed and `$env:DEPLOY_ORG_ID` is not set
+- **GIVEN** `-OrgId` is not passed and `$env:DEPLOY_ORGID` is not set
 - **WHEN** any deploy script starts
 - **THEN** it computes the OrgId as `0x` followed by the first four hex
   characters of `az account show --query id --output tsv`.
@@ -132,14 +132,16 @@ lowercased value of `-Location` (no dashes), and `<orgid>` the value of
 
 `01-Deploy-LlmSubnet.ps1` SHALL add one subnet inside the existing
 `vnet-llm-workload-<env>-<loc>-001` VNet (created by
-`a-infrastructure/03-deploy-workload-rg-vnet.ps1`). The subnet SHALL be
+`a-infrastructure/02-Initialize-WorkloadRg.ps1`). The subnet SHALL be
 dual-stack with an IPv6 `/64` and an IPv4 `/27`, derived deterministically
-using the workload-VNet ID `0300` and subnet ID `01`:
+using the workload-VNet ID `02` (matching the
+`DEPLOY_WORKLOAD_VNET_ID` default in `a-infrastructure/02-Initialize-WorkloadRg.ps1`)
+and subnet ID `01`:
 
 | Layer | Prefix                                  |
 |-------|-----------------------------------------|
-| IPv6  | `fd<gg>:<gggg>:<gggggg>:0301::/64`      |
-| IPv4  | `10.<gg>.3.32/27`                       |
+| IPv6  | `fd<gg>:<gggg>:<gggggg>:0201::/64`      |
+| IPv4  | `10.<gg>.2.32/27`                       |
 
 The script SHALL NOT modify the workload VNet's address space, peerings, or
 any subnet other than the one it creates.
@@ -148,8 +150,8 @@ any subnet other than the one it creates.
 
 - **GIVEN** `UlaGlobalId` resolves to `abcdef0123`
 - **WHEN** `01-Deploy-LlmSubnet.ps1` runs
-- **THEN** the subnet has IPv6 prefix `fdab:cdef:0123:0301::/64` and IPv4
-  prefix `10.171.3.32/27` (0xab = 171).
+- **THEN** the subnet has IPv6 prefix `fdab:cdef:0123:0201::/64` and IPv4
+  prefix `10.171.2.32/27` (0xab = 171).
 
 ### Requirement: NSG SHALL allow only inbound 22, 80, and 443
 
@@ -248,9 +250,10 @@ SHALL exit 0 without modification. The script SHALL NOT resize, retype, or
 re-tag an existing disk.
 
 No script in this capability SHALL delete this disk. Removal of the disk is
-the responsibility of `a-infrastructure/91-remove-workload-rg.ps1` (which
-cascade-deletes the workload RG) or of explicit operator action outside
-this capability.
+the responsibility of RG-level teardown of `rg-llm-workload-<env>-001`
+(today via `az group delete`, in a future change via a dedicated
+`a-infrastructure/9x-Remove-WorkloadRg.ps1`) or of explicit operator
+action outside this capability.
 
 #### Scenario: Disk is created with the documented attributes
 
@@ -668,8 +671,9 @@ running vs. deallocated, troubleshooting pointers (cloud-init log
 location, vLLM systemd unit name, `ConditionPathExists` semantics, certbot
 logs), the explicit acknowledgement that data-disk loss requires
 re-pulling the model from Hugging Face, and a note that no `9x-Remove`
-script exists in `c-workload/` (RG-level teardown is handled by
-`a-infrastructure/91-remove-workload-rg.ps1`).
+script exists in `c-workload/` (RG-level teardown of
+`rg-llm-workload-<env>-001` is owned by `a-infrastructure/`, today via
+`az group delete`).
 
 #### Scenario: README enables a new operator to run the scripts
 

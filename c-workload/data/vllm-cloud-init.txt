@@ -1,0 +1,241 @@
+#cloud-config
+# vLLM OpenAI-compatible inference server on a single Ubuntu 22.04 VM.
+#
+# This file is a template. `c-workload/06-Deploy-LlmVm.ps1` substitutes
+# every `#INIT_*#` token before passing the result to `az vm create
+# --custom-data`. If you see a `#INIT_*#` token at boot time, the render
+# step failed its post-render assertion; check the PowerShell script
+# output.
+#
+# The VM fetches its API key from Key Vault via its user-assigned managed
+# identity at first boot -- nothing private is substituted into this file
+# by the PowerShell script. The model bytes are NOT downloaded by cloud-
+# init: they are placed onto the persistent data disk later by
+# `util/Download-LlmModelToDisk.ps1`, which is the operator's deliberate
+# next step after this VM comes up.
+#
+# Boot ordering on the happy path:
+#
+#   1. Format/mount the data disk at /opt/models (mkfs only if blank).
+#   2. Create the `vllm` system user.
+#   3. Log in with the UAMI; fetch the API key into /etc/vllm/vllm.env.
+#   4. Create /opt/vllm/.venv and `pip install vllm==<pinned>`.
+#   5. setcap so the venv's python can bind :443 as non-root.
+#   6. Issue a Let's Encrypt cert (HTTP-01 standalone) for both FQDNs.
+#   7. Install the renewal deploy hook; copy initial cert into /etc/vllm/certs.
+#   8. systemctl daemon-reload && enable vllm.service (do NOT start --
+#      the unit's ConditionPathExists keeps it inactive until the model
+#      is loaded onto /opt/models by the operator's util script).
+
+apt:
+  conf: |
+    Acquire::Retries "60";
+    DPkg::Lock::Timeout "60";
+  # Add Microsoft's apt repo for the Azure CLI (used at first boot to
+  # `az login --identity` and pull the API key from Key Vault).
+  sources:
+    azure-cli.list:
+      source: "deb [arch=amd64 signed-by=$KEY_FILE] https://packages.microsoft.com/repos/azure-cli/ $RELEASE main"
+      keyid: EB3E94ADBE1229CF
+      keyserver: keyserver.ubuntu.com
+
+package_update: true
+package_upgrade: false
+packages:
+  - certbot
+  - python3-venv
+  - python3-pip
+  - libcap2-bin
+  - jq
+  - curl
+  - e2fsprogs
+  - azure-cli
+
+write_files:
+  # Certbot deploy hook: copies renewed cert material into /etc/vllm/certs
+  # and restarts vllm.service. Fires on initial issuance (invoked
+  # explicitly below) and on every successful renewal driven by the
+  # certbot.timer systemd unit.
+  - path: /etc/letsencrypt/renewal-hooks/deploy/10-vllm-restart.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      SOURCE_DIR=/etc/letsencrypt/live/vllm-cert
+      CERTIFICATE_DIR=/etc/vllm/certs
+      if [ "${RENEWED_LINEAGE}" = "${SOURCE_DIR}" ]; then
+          mkdir -p "${CERTIFICATE_DIR}"
+          cp "${RENEWED_LINEAGE}/fullchain.pem" "${CERTIFICATE_DIR}/server.pem"
+          cp "${RENEWED_LINEAGE}/privkey.pem"   "${CERTIFICATE_DIR}/server.key"
+          chown vllm:vllm "${CERTIFICATE_DIR}/server.pem" "${CERTIFICATE_DIR}/server.key"
+          chmod 0600     "${CERTIFICATE_DIR}/server.pem" "${CERTIFICATE_DIR}/server.key"
+          systemctl restart vllm
+      fi
+
+  # systemd unit for vLLM. ConditionPathExists keeps the unit inactive
+  # (silently, no error) until util/Download-LlmModelToDisk.ps1 places
+  # the model files. After that script runs `systemctl start vllm`, the
+  # unit comes up and stays up across reboots.
+  - path: /etc/systemd/system/vllm.service
+    owner: root:root
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=vLLM OpenAI-compatible server
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=#INIT_MODEL_MOUNT_POINT#/#INIT_MODEL_DIR_NAME#/config.json
+
+      [Service]
+      User=vllm
+      Group=vllm
+      EnvironmentFile=/etc/vllm/vllm.env
+      ExecStart=/opt/vllm/.venv/bin/python -m vllm.entrypoints.openai.api_server \
+          --host :: \
+          --port 443 \
+          --ssl-certfile /etc/vllm/certs/server.pem \
+          --ssl-keyfile  /etc/vllm/certs/server.key \
+          --api-key      ${VLLM_API_KEY} \
+          --model        #INIT_MODEL_MOUNT_POINT#/#INIT_MODEL_DIR_NAME# \
+          --served-model-name #INIT_SERVED_MODEL_NAME# \
+          --tool-call-parser hermes \
+          --enable-auto-tool-choice \
+          --max-model-len 32768
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # First-boot bootstrap script. Everything sequencing-sensitive lives
+  # here so we can rerun it by hand if needed for debugging.
+  - path: /usr/local/sbin/vllm-bootstrap.sh
+    owner: root:root
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      KV_NAME='#INIT_KEY_VAULT_NAME#'
+      API_KEY_SECRET='#INIT_API_KEY_SECRET_NAME#'
+      UAMI_CLIENT_ID='#INIT_UAMI_CLIENT_ID#'
+      VLLM_VERSION='#INIT_VLLM_VERSION#'
+      MODEL_MOUNT='#INIT_MODEL_MOUNT_POINT#'
+      HOST_NAME='#INIT_HOST_NAME#'
+      HOST_NAME_IPV4='#INIT_HOST_NAME_IPV4#'
+      CERT_EMAIL='#INIT_CERT_EMAIL#'
+      ACME_STAGING_FLAG='#INIT_ACME_STAGING_FLAG#'
+
+      # 1. Find the data disk and prepare /opt/models.
+      #
+      # Azure attaches data disks at LUN 0 → /dev/disk/azure/scsi1/lun0
+      # (the symlink is provided by waagent's udev rules). Wait up to ~60s
+      # for the symlink to appear -- it can lag a fresh `az vm create`
+      # slightly.
+      DEVICE_LINK=/dev/disk/azure/scsi1/lun0
+      deadline=$((SECONDS + 60))
+      until [ -e "$DEVICE_LINK" ]; do
+        if [ $SECONDS -ge $deadline ]; then
+          echo "ERROR: data disk symlink $DEVICE_LINK did not appear within 60s" >&2
+          exit 1
+        fi
+        sleep 2
+      done
+      DEVICE=$(readlink -f "$DEVICE_LINK")
+      echo "data disk resolved to $DEVICE"
+
+      # mkfs only if there is no existing filesystem. blkid prints the
+      # detected type to stdout and exits 0 when something is present;
+      # exits 2 with empty output when the device is blank. This is the
+      # critical guard that lets the same disk survive VM rebuilds.
+      if ! blkid -o value -s TYPE "$DEVICE" >/dev/null 2>&1; then
+        echo "no filesystem detected on $DEVICE; running mkfs.ext4 -L llm-models"
+        mkfs.ext4 -L llm-models -F "$DEVICE"
+      else
+        echo "existing filesystem detected on $DEVICE ($(blkid -o value -s TYPE "$DEVICE")); skipping mkfs"
+      fi
+
+      mkdir -p "$MODEL_MOUNT"
+      # Persist the mount via LABEL so we are not coupled to LUN ordering
+      # or device naming. `nofail` lets the VM boot if the disk is missing.
+      if ! grep -qE '^LABEL=llm-models[[:space:]]' /etc/fstab; then
+        echo "LABEL=llm-models $MODEL_MOUNT ext4 defaults,nofail 0 2" >> /etc/fstab
+      fi
+      mount -a
+      echo "$MODEL_MOUNT mounted:"
+      findmnt "$MODEL_MOUNT" || true
+
+      # 2. Create the `vllm` system user (idempotent) and hand it the mount.
+      if ! id -u vllm >/dev/null 2>&1; then
+        useradd --system --create-home --home-dir /var/lib/vllm --shell /usr/sbin/nologin vllm
+      fi
+      chown vllm:vllm "$MODEL_MOUNT"
+
+      # 3. az login --identity, with retry to absorb first-boot IMDS lag.
+      # --allow-no-subscriptions: the UAMI has no role assignments by
+      # design (only a Key Vault access-policy entry for get/list secrets,
+      # which is a data-plane grant). Without this flag, `az login
+      # --identity` fails enumerating subscriptions.
+      deadline=$((SECONDS + 120))
+      until az login --identity --client-id "$UAMI_CLIENT_ID" --allow-no-subscriptions --output none 2>/dev/null; do
+        if [ $SECONDS -ge $deadline ]; then
+          echo "ERROR: az login --identity did not succeed within 120s" >&2
+          exit 1
+        fi
+        sleep 5
+      done
+
+      # 4. Fetch the API key and write /etc/vllm/vllm.env (mode 0600).
+      mkdir -p /etc/vllm /etc/vllm/certs
+      chown vllm:vllm /etc/vllm /etc/vllm/certs
+      VLLM_API_KEY=$(az keyvault secret show \
+          --vault-name "$KV_NAME" --name "$API_KEY_SECRET" \
+          --query value -o tsv)
+      install -m 0600 -o vllm -g vllm /dev/null /etc/vllm/vllm.env
+      printf 'VLLM_API_KEY=%s\nHF_HOME=%s/.cache\n' "$VLLM_API_KEY" "$MODEL_MOUNT" \
+          > /etc/vllm/vllm.env
+      unset VLLM_API_KEY
+
+      # 5. Create the venv and install vLLM (pinned). The pin matters --
+      # vLLM's CLI flags (notably --tool-call-parser and quantisation
+      # options) drift between minor versions.
+      python3 -m venv /opt/vllm/.venv
+      /opt/vllm/.venv/bin/pip install --upgrade pip
+      /opt/vllm/.venv/bin/pip install "vllm==${VLLM_VERSION}"
+      chown -R vllm:vllm /opt/vllm
+
+      # 6. setcap on the venv's python so vllm.service can bind :443
+      # without running as root. The capability is set on the venv-
+      # specific binary so it does not grant the privilege system-wide.
+      VENV_PY=$(readlink -f /opt/vllm/.venv/bin/python)
+      setcap 'cap_net_bind_service=+ep' "$VENV_PY"
+
+      # 7. Issue the initial Let's Encrypt cert.
+      # certbot standalone binds :80 transiently; vLLM never binds 80,
+      # and the systemd unit is not started yet, so there is no port
+      # conflict. ACME_STAGING_FLAG is empty for production, --test-cert
+      # for staging.
+      certbot certonly --standalone --preferred-challenges http \
+          --cert-name vllm-cert \
+          -d "$HOST_NAME" -d "$HOST_NAME_IPV4" \
+          -n --agree-tos -m "$CERT_EMAIL" \
+          ${ACME_STAGING_FLAG}
+
+      # 8. Run the deploy hook explicitly so the initial cert lands in
+      # /etc/vllm/certs without waiting for the first renewal. The hook
+      # also calls `systemctl restart vllm`, which is a no-op while the
+      # unit's ConditionPathExists is unsatisfied (the model is not
+      # present yet) -- exactly what we want.
+      RENEWED_LINEAGE=/etc/letsencrypt/live/vllm-cert \
+          /etc/letsencrypt/renewal-hooks/deploy/10-vllm-restart.sh
+
+      # 9. Enable the unit; do NOT start it. The operator's
+      # util/Download-LlmModelToDisk.ps1 will start it once the model
+      # files are on disk.
+      systemctl daemon-reload
+      systemctl enable vllm
+
+      echo "vllm-bootstrap complete; vllm.service enabled (inactive until model is loaded)"
+
+runcmd:
+  - [ /usr/local/sbin/vllm-bootstrap.sh ]

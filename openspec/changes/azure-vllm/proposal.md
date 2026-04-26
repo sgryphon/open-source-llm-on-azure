@@ -10,7 +10,7 @@ The model is held on a **persistent Managed Disk** that is created independently
 
 ## What Changes
 
-- **New** `c-workload/01-Deploy-LlmSubnet.ps1` — creates a public-facing subnet `snet-llm-vllm-<env>-<loc>-001` inside the existing workload VNet (provisioned by `a-infrastructure/03-deploy-workload-rg-vnet.ps1`) and an associated NSG `nsg-llm-vllm-<env>-001` with inbound rules for **22/tcp** (SSH), **80/tcp** (ACME HTTP-01 challenge), and **443/tcp** (vLLM API). All other inbound traffic denied via the NSG default. Idempotent.
+- **New** `c-workload/01-Deploy-LlmSubnet.ps1` — creates a public-facing subnet `snet-llm-vllm-<env>-<loc>-001` inside the existing workload VNet (provisioned by `a-infrastructure/02-Initialize-WorkloadRg.ps1`) and an associated NSG `nsg-llm-vllm-<env>-001` with inbound rules for **22/tcp** (SSH), **80/tcp** (ACME HTTP-01 challenge), and **443/tcp** (vLLM API). All other inbound traffic denied via the NSG default. Idempotent.
 - **New** `c-workload/02-Deploy-LlmKeyVaultSecret.ps1` — generates a 256-bit random API token, stores it as `vllm-api-key` in the existing shared Key Vault. Idempotent: re-uses the existing secret if present, only rotates when called with `-Rotate` switch.
 - **New** `c-workload/03-Deploy-LlmIdentity.ps1` — creates the user-assigned managed identity that the VM will bind at create time, and grants it `get, list` on Key Vault secrets via Key Vault access policy. No storage permissions are granted (no storage account exists in this design). Idempotent.
 - **New** `c-workload/04-Deploy-LlmPublicIp.ps1` — creates a static dual-stack public IP set: one IPv6 (primary) and one IPv4, both Standard SKU, with DNS labels `llm-<orgid>-<env>` and `llm-<orgid>-<env>-ipv4` under `<location>.cloudapp.azure.com`. The DNS label is what Let's Encrypt issues against — no external DNS provider is involved. Idempotent.
@@ -49,7 +49,7 @@ The model is held on a **persistent Managed Disk** that is created independently
   - `util/Download-LlmModelToDisk.ps1`
   - `util/Detach-LlmModelDisk.ps1`
   - `docs/OpenCode-vllm-config.md`
-- **Files NOT created**: no `9x-Remove-*.ps1` script in `c-workload/`. Removal of the workload-RG-level resources is the responsibility of `a-infrastructure/91-remove-workload-rg.ps1` (which cascade-deletes everything in the RG, including the data disk). Targeted intra-workload teardown can be added later as one-shot helpers in `util/` if and when the operator asks for it.
+- **Files NOT created**: no `9x-Remove-*.ps1` script in `c-workload/`. Removal of the workload-RG-level resources is the responsibility of `a-infrastructure/` (today via `az group delete --name rg-llm-workload-<env>-001`; a dedicated `9x-Remove-WorkloadRg.ps1` may be added in a future change). Targeted intra-workload teardown can be added later as one-shot helpers in `util/` if and when the operator asks for it.
 - **Devcontainer / tooling**: no new tooling required (Azure CLI + PowerShell already present). No local Python venv is created on the operator's machine for any reason. The Hugging Face download happens inside the VM, invoked remotely.
 - **Prerequisites**:
   - `a-infrastructure/01..03` completed (workload RG + VNet exist).

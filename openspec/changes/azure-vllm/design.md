@@ -33,7 +33,7 @@ Surrounding constraints:
 - Bastion / JIT for SSH (SSH is open to the internet, key-only, matching the IoT-repo reference pattern).
 - Cert material in Key Vault (cert lives on the VM disk, certbot manages it; same as Mosquitto).
 - High availability, multi-region, or GPU autoscale.
-- Any `9x-Remove-*.ps1` script inside `c-workload/`. RG-level teardown is `a-infrastructure/91-remove-workload-rg.ps1`'s job.
+- Any `9x-Remove-*.ps1` script inside `c-workload/`. RG-level teardown of the workload RG is the responsibility of `a-infrastructure/` (an `a-infrastructure/9x-Remove-WorkloadRg.ps1` may be added in a future change; today, `az group delete --name rg-llm-workload-<env>-001` is the operator's escape hatch).
 - Azure Storage / Blob staging. The earlier draft of this design used a Blob container as a canonical model store; that is dropped. The data disk is the canonical store; if it is lost, Hugging Face is the recovery source.
 - Caching the model in a custom VM image.
 - Modifying `core-infrastructure` (the workload VNet is consumed read-only; only a new subnet is added inside it).
@@ -169,7 +169,7 @@ The operator's workstation never holds the model bytes. The VM's outbound intern
 - **Create:** `05-Deploy-LlmDataDisk.ps1` runs `az disk create --size-gb 8 --sku StandardSSD_LRS …` only if `az disk show` reports the disk does not exist. Re-runs are a no-op. The script does not resize, retype, or re-tag an existing disk.
 - **Attach:** `06-Deploy-LlmVm.ps1` resolves the disk ID and passes `--attach-data-disks <id>` (never `--data-disk-sizes-gb`, which would create a new disk bundled to the VM). It also pre-checks: if the disk is `Attached` to a different VM, fail with a clear error; if attached to this VM already, treat as success.
 - **Detach:** `util/Detach-LlmModelDisk.ps1` runs `az vm disk detach`. Idempotent against an already-detached disk.
-- **Delete:** never by `c-workload/` or `util/` scripts. The disk is only deleted by RG-level teardown (`a-infrastructure/91-remove-workload-rg.ps1`) or by the operator manually via the portal/CLI when truly retiring the workload.
+- **Delete:** never by `c-workload/` or `util/` scripts. The disk is only deleted by RG-level teardown of `rg-llm-workload-<env>-001` (e.g. `az group delete`, or a future `a-infrastructure/9x-Remove-WorkloadRg.ps1`) or by the operator manually via the portal/CLI when truly retiring the workload.
 
 **Mount:** cloud-init mounts via `LABEL=llm-models` rather than by `/dev/sdc` or `/dev/disk/by-lun/0`, because:
 
@@ -210,17 +210,17 @@ The UAMI's `clientId` is substituted into cloud-init via `#INIT_UAMI_CLIENT_ID#`
 
 ### D7. Subnet inside the existing workload VNet, dedicated NSG, three inbound allow rules
 
-**Chosen:** A new subnet `snet-llm-vllm-<env>-<location>-001` is added inside the existing `vnet-llm-workload-<env>-<location>-001` (created by `a-infrastructure/03`). The subnet is a `/64` IPv6 + `/27` IPv4 (matching the project's per-subnet sizing).
+**Chosen:** A new subnet `snet-llm-vllm-<env>-<location>-001` is added inside the existing `vnet-llm-workload-<env>-<location>-001` (created by `a-infrastructure/02-Initialize-WorkloadRg.ps1`). The subnet is a `/64` IPv6 + `/27` IPv4 (matching the project's per-subnet sizing).
 
-`<vv>` (VNet ID) is `0300` (the workload VNet's ID, fixed by `core-infrastructure`).
+`<vv>` (VNet ID) is `02` (the workload VNet's ID, fixed by `a-infrastructure/02-Initialize-WorkloadRg.ps1` `DEPLOY_WORKLOAD_VNET_ID` default).
 `<ss>` (subnet ID inside the workload VNet) is `01` for this subnet.
 
-Subnet prefixes (using `core-infrastructure`'s formulae):
+Subnet prefixes (using the project's per-subnet formula `fd<gg>:<gggg>:<gggggg>:<vv><ss>::/64` for IPv6 and `10.<gg>.<vv>.<ss*32>/27` for IPv4):
 
 | Layer | Prefix |
 |---|---|
-| IPv6 | `fd<gg>:<gggg>:<gggggg>:0301::/64` |
-| IPv4 | `10.<gg>.3.32/27` |
+| IPv6 | `fd<gg>:<gggg>:<gggggg>:0201::/64` |
+| IPv4 | `10.<gg>.2.32/27` |
 
 A new NSG `nsg-llm-vllm-<env>-001` is associated to the subnet with three inbound allow rules:
 
@@ -314,7 +314,7 @@ Context length: `--max-model-len 32768`. Qwen2.5-Coder-7B's training context is 
 | `util/Download-LlmModelToDisk.ps1` | HF → `/opt/models` on the VM via `run-command invoke` |
 | `util/Detach-LlmModelDisk.ps1` | Deallocate VM, detach data disk, optionally `az vm delete` |
 
-Substituted cloud-init lands at `c-workload/temp/vllm-cloud-init.txt~` (gitignored). No `9x-Remove-*.ps1` script exists in `c-workload/`; RG-level teardown is `a-infrastructure/91-remove-workload-rg.ps1`'s job.
+Substituted cloud-init lands at `c-workload/temp/vllm-cloud-init.txt~` (gitignored — `**/temp/` rule in `.gitignore`). No `9x-Remove-*.ps1` script exists in `c-workload/`; RG-level teardown of `rg-llm-workload-<env>-001` is owned by `a-infrastructure/` (today via `az group delete`, in future via a dedicated removal script).
 
 **Alternatives considered:**
 
