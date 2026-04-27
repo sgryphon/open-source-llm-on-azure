@@ -4,63 +4,31 @@
   Generate strongSwan VPN certificate material locally and publish it to the shared Key Vault.
 
 .DESCRIPTION
-  Creates, idempotently, into the repository-root `./temp/` directory:
+  Creates strongSwan certificate files and adds them to the shared KeyVault for:
 
-    * CA keypair              -- strongswan-ca.key / strongswan-ca.pem      (RSA 4096, 10yr)
-    * Server keypair + cert   -- strongswan-server.key / .pem                (RSA 4096, 5yr)
-    * Initial client bundle   -- strongswan-client-001.key / .pem / .p12    (RSA 4096, 1yr)
-    * PKCS#12 password        -- strongswan-client-001-p12-password.txt
-
-  Then uploads the following to the shared Key Vault from the Key Vault
-  deployment script:
-
-    * strongswan-<env>-ca-cert                  (application/x-pem-file)
-    * strongswan-<env>-server-cert              (application/x-pem-file)
-    * strongswan-<env>-server-key               (application/x-pem-file)
-    * strongswan-<env>-client-001-p12           (application/x-pkcs12, base64)
-    * strongswan-<env>-client-001-p12-password  (no content-type)
-
-  The CA *private* key (strongswan-ca.key) is NEVER uploaded. It stays only in
-  `./temp/` on the operator machine, so only whoever ran this script can issue
-  new client certs.
-
+    * "strongswan-<OrgId>-dev.australiaeast.cloudapp.azure.com"
+    * "strongswan-<OrgId>-dev-ipv4.australiaeast.cloudapp.azure.com"
+  
   Generation and upload are independently idempotent: each step checks for
   existing output (on disk or in Key Vault) and is skipped if present. A forced
   regeneration requires the operator to delete the relevant files in `./temp/`
   (and, optionally, purge the Key Vault secret).
 
 .NOTES
-  PREREQUISITES
-  * The Key Vault deployment script in this folder must have run (this script
-    uploads to the vault it created).
-  * The devcontainer must be rebuilt after merging this change so that `pki`
-    (from `strongswan-pki`) and `openssl` are on PATH. Running `which pki` and
-    `which openssl` should both succeed before running this script.
+  The generated files are created in the local `./temp/` directory (excluded from git):
+    * CA keypair              -- strongswan-ca.key / strongswan-ca.pem      (RSA 4096, 10yr)
+    * Server keypair + cert   -- strongswan-server.key / .pem                (RSA 4096, 5yr)
+    * Initial client bundle   -- strongswan-client-001.key / .pem / .p12    (RSA 4096, 1yr)
+    * PKCS#12 password        -- strongswan-client-001-p12-password.txt
 
-  PAIRS WITH THE STRONGSWAN VM DEPLOYMENT SCRIPT
-  This script generates the server cert with subjectAltName DNS entries that
-  match the public FQDNs the VM-deployment script will assign to the VM.
-  That only works if both scripts compute the same FQDNs from the same
-  parameters. The FQDNs are deterministic:
-
-      IPv6 FQDN = "strongswan-<OrgId>-<Environment>.<Location>.cloudapp.azure.com"
-      IPv4 FQDN = "strongswan-<OrgId>-<Environment>-ipv4.<Location>.cloudapp.azure.com"
-
-  Where:
-    * `<OrgId>`       comes from `-OrgId` / `DEPLOY_ORGID` on both scripts
-                      (default: first 4 hex chars of the subscription id,
-                       prefixed with "0x").
-    * `<Environment>` comes from `-Environment` / `DEPLOY_ENVIRONMENT`.
-    * `<Location>`    here is `-Location` / `DEPLOY_LOCATION` (default
-                      `australiaeast`); on the VM-deployment script it is
-                      taken from the RG's location, which must match this
-                      value.
-
-  If any of `-OrgId`, `-Environment`, `-Location`, or `-AddPublicIpv4` differ
-  between the two runs, the server cert SANs won't match the VM's FQDNs and
-  IKEv2 clients will reject the server. Exporting the matching `DEPLOY_*` env
-  vars once and running both scripts in the same shell is the recommended
-  workflow.
+  The CA *private* key (strongswan-ca.key) is not uploaded. It stays only in
+  `./temp/` on the operator machine, so only whoever ran this script can issue
+  new client certs.
+  
+  Generation and upload are independently idempotent: each step checks for
+  existing output (on disk or in Key Vault) and is skipped if present. A forced
+  regeneration requires the operator to delete the relevant files in `./temp/`
+  (and, optionally, purge the Key Vault secret).
 
   CONVENTIONS
   Follows the Azure CAF naming and tagging conventions used elsewhere in this
@@ -85,8 +53,6 @@ param (
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
     ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4").
     [string]$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL,
-    ## When `$true`, the server cert also includes the IPv4 FQDN as a SAN.
-    [switch]$AddPublicIpv4 = ([string]::IsNullOrEmpty($ENV:DEPLOY_ADD_IPV4) -or $ENV:DEPLOY_ADD_IPV4 -eq 'true' -or $ENV:DEPLOY_ADD_IPV4 -eq '1'),
     ## Path where generated material is written. Default: `<repo-root>/temp`.
     ## This path MUST be gitignored; the repo root already excludes `temp/`.
     [string]$TempPath = $ENV:DEPLOY_TEMP_PATH
@@ -102,10 +68,10 @@ $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))"
 $Location = $ENV:DEPLOY_LOCATION ?? 'australiaeast'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
-$AddPublicIpv4 = $true
 $TempPath = $ENV:DEPLOY_TEMP_PATH
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $SubscriptionId = $(az account show --query id --output tsv)
@@ -136,7 +102,7 @@ $locationLower = $kv.location.ToLowerInvariant()
 $ipv6Fqdn = "$serverDnsLabel.$locationLower.cloudapp.azure.com".ToLowerInvariant()
 $ipv4Fqdn = "$serverDnsLabel-ipv4.$locationLower.cloudapp.azure.com".ToLowerInvariant()
 $fqdnList = @($ipv6Fqdn)
-if ($AddPublicIpv4) { $fqdnList += $ipv4Fqdn }
+$fqdnList += $ipv4Fqdn
 Write-Verbose "Server cert SAN FQDNs: $($fqdnList -join ', ')"
 # ---------------------------------------------------------------------------
 

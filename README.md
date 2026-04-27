@@ -8,10 +8,21 @@ Connect your local AI tools to an open source LLM, run in a private environment 
 
 ## How to run
 
+Scripts are writting in PowerShell, and use the Azure CLI to configure resources.
+
+The development container includes the necessary tools.
+
+Before running scripts, enable verbose output to see processing details:
+
+```powershell
+$VerbosePreference = 'Continue'
+```
+
 1. You will need an Azure subscription. Scripts are written assuming you have full access.
-2. Log in using the Azure CLI
-3. Run the `infrastruture` scripts, in order, to create resource groups and network routing. If you have a more locked down environment, you may need to get central IT to provision out what you need.
+2. Log in using the Azure CLI (`az login`)
+3. Run the `infrastructure` scripts, in order, to create resource groups and network routing. If you have a more locked down environment, you may need to get central IT to provision out what you need.
 4. Run the `shared` scripts, in order, to create shared landing zone components. If your enviornment already has shared components some of these may not be needed.
+  - You need to set the VPN user password, e.g. `$env:DEPLOY_VPN_USER_PASSWORD = 'P@ssword01'`
 5. Run the `workload` scripts to deploy the vLLM server.
 6. Run the `util/Import-LlmModel.ps` script to download a model to the server. 
 
@@ -21,7 +32,7 @@ The `infrastructure` scripts create the following resource groups and networks. 
 
 | Resource Group | Purpose |
 | -- | -- |
-| rg-llm-core-001 | Contains shared services |
+| rg-llm-core-001 | Contains shared services. |
 | rg-llm-workload-dev-001 | For the LLM workload. May need to be provisioned by central IT. |
 
 The scripts also use an `fdxx:xxxx:xxxx::/48` ULA range and `10.xx.0.0/16` IPv4 range for networking. The 10-byte ULA global prefix is deterined by a hash of the subscription, so that it is deterministic but varies by subscription.
@@ -43,15 +54,41 @@ A central IT function may allocate these resources, or they may be dedicated res
 
 | Component | Details | Purpose |
 | -- | -- | -- |
-| Azure Monitor | log-llm-shared-dev-001 | Used for monitoring |
-| KeyVault | log-llm-shared-dev-001 | Used for secure storage of secrets and certificates, rather than storing locally on machines. |
-| VPN Gateway | vmstrongswan001 | Road warrior VPN gateway, to demonstrate use of a second layer of security. |
+| Azure Monitor | log-llm-shared-dev | Used for monitoring. |
+| App Insights | appi-llm-shared-dev | Used for application monitoring. |
+| KeyVault | kv-llm-shared-<orgId>-dev| Used for secure storage of secrets and certificates, rather than storing locally on machines. |
 
-The following subnet ranges are allocated.
+### VPN Gateway (StrongSwan)
+
+Road warrior VPN gateway, to demonstrate use of a second layer of security.
+
+| Component | Details | Purpose |
+| -- | -- | -- |
+| Managed Identity | id-llm-strongswan-dev-001 | Identity for the VPN gateway server. |
+| Network Security Group | nsg-llm-gateway-dev-001 | Security group for gateway subnet. |
+| VPN Gateway | vmstrongswan001 | Road warrior VPN gateway, to demonstrate use of a second layer of security. |
+| Public IP | pip-vmstrongswan001-dev-australiaeast-001 | Public IPv6. |
+| Public IP | pipv4-vmstrongswan001-dev-australiaeast-001 | Public IPv4. |
+| Network Interface | nic-01-vmstrongswan-dev-001 | Separate NIC, so that public IP can be retained if server is recreated. |
+| Disk | osdiskvmstrongswan001 | OS disk for the VM. |
+| Virtual Machine | vmstrongswan001 | StrongSwan virtual machine. |
+
+The following subnet ranges are allocated:
 
 | Vnet | IPv6 range | IPv4 range | Purpose |
 | snet-llm-gateway-dev-australiaeast-001 | `--:0100::/64` | `--.16.0/24` | VPN gateway subnet. |
 | VPN Clients | `--:300::/64` | `--.48.0/24` | Subnet for VPN client pool. |
+
+VPN address pools:
+  * IPv6 allocates addresses from the range `--:300::1000` to `--:300::1fff`.
+  * IPv4 allocates addresses from the range `--.48.128` to `--.48.255`.
+
+Required secrets and certificates are stored in the shared Key Vault.
+
+The virtual machine is configured to shut down automatically (based on Brisbane, Australia time), to save costs.
+
+## Workload
+
 
 
 ### Open source large language model (LLM)

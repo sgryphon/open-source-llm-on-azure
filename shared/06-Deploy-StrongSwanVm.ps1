@@ -106,6 +106,7 @@ $ShutdownEmail = ''
 $AddPublicIpv4 = $true
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($VpnUserPassword)) {
@@ -180,11 +181,11 @@ $prefix = "fd$($UlaGlobalId.Substring(0, 2)):$($UlaGlobalId.Substring(2, 4)):$($
 
 # IPv6 subnet: fd<gg>:<gggg>:<gggg>:<VpnVnetId>::/64
 $poolSubnetAddress = [IPAddress]"$($prefix):$($PoolVnetId)$($PoolSubnetId)::"
-$poolSubnetIpPrefix = "$gatewaySubnetAddress/64"
+$poolSubnetIpPrefix = "$poolSubnetAddress/64"
 
 # IPv6 pool: /116 at ::1000 inside the /64.
 $poolBase    = [IPAddress]"$($prefix):$($PoolVnetId)$($PoolSubnetId)::1000"
-$vipPoolIPv6 = "$poolSubnetAddrress/116"
+$vipPoolIPv6 = "$poolBase/116"
 
 # IPv4: 10.<ggDec>.<vpnVnetDec>.0/24 ; pool = upper half /25 at .128.
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
@@ -194,8 +195,8 @@ $decSubnet = [int]("0x$PoolSubnetId" -bAnd 0xf)
 $poolSubnetIPv4 = "10.$prefixByte.$($decVnet + $decSubnet).0/24"
 $vipPoolIPv4    = "10.$prefixByte.$($decVnet + $decSubnet).128/25"
 
-Write-Verbose "VPN subnets: IPv4=$vpnSubnetIPv4, IPv6=$vpnSubnetIPv6"
-Write-Verbose "VPN pools  : IPv4=$vipPoolIPv4, IPv6=$vipPoolIPv6"
+Write-Verbose "VPN subnets: IPv6=$poolSubnetAddress, IPv4=$poolSubnetIPv4"
+Write-Verbose "VPN pools  : IPv6=$vipPoolIPv6, IPv4=$vipPoolIPv4"
 # ---------------------------------------------------------------------------
 
 # Secret names must match those written by the certificate-deployment script.
@@ -341,10 +342,10 @@ $rendered = (Get-Content -Path $templatePath -Raw)
 $subs = [ordered]@{
     '#INIT_VPN_USERNAME#'            = $VpnUsername
     '#INIT_VPN_PASSWORD#'            = $VpnUserPassword
-    '#INIT_VPN_SUBNET_IPV4#'         = $vpnSubnetIPv4
-    '#INIT_VPN_SUBNET_IPV6#'         = $vpnSubnetIPv6
-    '#INIT_VIP_POOL_IPV4#'           = $vipPoolIPv4
+    '#INIT_VPN_SUBNET_IPV6#'         = $poolSubnetIpPrefix
+    '#INIT_VPN_SUBNET_IPV4#'         = $poolSubnetIPv4
     '#INIT_VIP_POOL_IPV6#'           = $vipPoolIPv6
+    '#INIT_VIP_POOL_IPV4#'           = $vipPoolIPv4
     '#INIT_SERVER_FQDNS#'            = $serverFqdnsJoined
     '#INIT_KEY_VAULT_NAME#'          = $kvName
     '#INIT_CA_SECRET_NAME#'          = $caSecretName

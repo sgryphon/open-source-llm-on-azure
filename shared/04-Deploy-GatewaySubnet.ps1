@@ -6,8 +6,9 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * Network Security Group
-    * Subnet `rg-llm-core-001`
+    * Network Security Group `nsg-llm-gateway-dev-001
+
+  Adds a subnet `subnet-llm-gateway-dev-australiaeast-001` to the hub vnet. 
 
   Addresses are derived deterministically with an IPv6 ULA Global ID 10-hex-character
   SHA256 prefix of the subscription ID. IPv4 has a 10.x network using the first byte.
@@ -80,6 +81,7 @@ $VnetId = $ENV:DEPLOY_HUB_VNET_ID ?? ("01")
 $SubnetId = $ENV:DEPLOY_GATEWAY_SUBNET_ID ?? ("00")
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
 $SubscriptionId = $(az account show --query id --output tsv)

@@ -6,9 +6,8 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * Log Analytics Workspace `log-llm-shared-dev-001`
-    * App Insights `appi-llm-shared-dev-001`
-    * Virtual network `vnet-llm-hub-australiaeast-001`, dual-stack (IPv6 ULA + IPv4)
+    * Log Analytics Workspace `log-llm-shared-dev`
+    * App Insights `appi-llm-shared-dev`
 
 .NOTES
   This creates Azure Monitor in the shared core resource group.
@@ -54,6 +53,7 @@ $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
 $SubscriptionId = $(az account show --query id --output tsv)

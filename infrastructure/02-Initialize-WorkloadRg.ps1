@@ -79,6 +79,7 @@ $UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemorySt
 $VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02")
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
 $SubscriptionId = $(az account show --query id --output tsv)
@@ -110,7 +111,7 @@ $vnetIpPrefix = "$vnetAddress/56"
 # Use the first byte of the ULA Global ID, and the vnet ID (as decimal)
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
 $decVnet = [int]("0x$VnetId" -bAnd 0xf) -shl 4
-$vnetIPv4 = "10.$prefixByte.$decVnetId.0/20"
+$vnetIPv4 = "10.$prefixByte.$decVnet.0/20"
 
 # Following standard tagging conventions from  Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging

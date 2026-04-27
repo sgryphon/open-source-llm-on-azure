@@ -6,18 +6,10 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * User-assigned managed identity `id-<Purpose>-strongswan-<Environment>-<Instance>`
-      in the shared core resource group.
-    * An access-policy entry on the shared Key Vault granting the identity
-      `get, list` on secrets (matches what `Key Vault Secrets User` grants
-      in RBAC mode).
+    * User-assigned managed identity `id-llm-strongswan-dev-001`
 
-  The identity is consumed by the strongSwan VM deployment script, which
-  binds it to the VM via `az vm create --assign-identity <resource-id>`.
-  Keeping the identity lifecycle independent of the VM lifecycle means
-  permissions can be (re-)asserted before the VM exists, eliminating any
-  cloud-init race against permission propagation and allowing VM rebuilds
-  without touching Key Vault permissions.
+  Adds an access-policy entry on the shared Key Vault granting the identity
+  `get, list` on secrets.
 
 .NOTES
   PREREQUISITES
@@ -28,9 +20,7 @@
   KEY VAULT MODE
   The shared Key Vault is provisioned in access-policy mode (not RBAC mode)
   because the PoC/demo runs under Contributor, which lacks
-  `Microsoft.Authorization/roleAssignments/write`. Granting via
-  `az keyvault set-policy` is a management-plane write on the vault that
-  Contributor has; this keeps the deployment self-sufficient.
+  `Microsoft.Authorization/roleAssignments/write`.
 
   Running these scripts requires the following to be installed:
   * PowerShell, https://github.com/PowerShell/PowerShell
@@ -76,6 +66,7 @@ $OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Sub
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $SubscriptionId = $(az account show --query id --output tsv)

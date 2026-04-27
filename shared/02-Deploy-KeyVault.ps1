@@ -6,10 +6,10 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * Key Vault `log-llm-shared-dev-001`
+    * Key Vault `kv-llm-shared-<orgId>-dev`
 
 .NOTES
-  This creates Azure Monitor in the shared core resource group.
+  This creates an Azure Key Vault in the shared core resource group.
 
   Running these scripts requires the following to be installed:
   * PowerShell, https://github.com/PowerShell/PowerShell
@@ -55,6 +55,7 @@ $OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Sub
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 #>
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
 $SubscriptionId = $(az account show --query id --output tsv)
