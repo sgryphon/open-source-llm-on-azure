@@ -139,7 +139,7 @@ Write-Verbose "Deploying LLM/vLLM VM for environment '$Environment' in subscript
 $rgName     = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
 $rg         = az group show --name $rgName 2>$null | ConvertFrom-Json
 if (-not $rg) {
-    throw "Workload resource group '$rgName' not found. Run a-infrastructure/02-Initialize-WorkloadRg.ps1 first."
+    throw "Workload resource group '$rgName' not found."
 }
 $location      = $rg.location
 $locationLower = $location.ToLowerInvariant()
@@ -152,27 +152,27 @@ $subnetName  = "snet-$Purpose-vllm-$Environment-$locationLower-$Instance".ToLowe
 $nsgName     = "nsg-$Purpose-vllm-$Environment-$Instance".ToLowerInvariant()
 
 $vnet = az network vnet show --name $vnetName --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $vnet) { throw "VNet '$vnetName' not found. Run a-infrastructure/02-Initialize-WorkloadRg.ps1 first." }
+if (-not $vnet) { throw "VNet '$vnetName' not found." }
 
 $snet = az network vnet subnet show --name $subnetName -g $rgName --vnet-name $vnetName 2>$null | ConvertFrom-Json
-if (-not $snet) { throw "Subnet '$subnetName' not found. Run c-workload/01-Deploy-LlmSubnet.ps1 first." }
+if (-not $snet) { throw "Subnet '$subnetName' not found." }
 
 $nsg = az network nsg show --name $nsgName -g $rgName 2>$null | ConvertFrom-Json
-if (-not $nsg) { throw "NSG '$nsgName' not found. Run c-workload/01-Deploy-LlmSubnet.ps1 first." }
+if (-not $nsg) { throw "NSG '$nsgName' not found." }
 
 $pipV6Name  = "pip-$Purpose-vllm-$Environment-$locationLower-$Instance".ToLowerInvariant()
 $pipV4Name  = "pipv4-$Purpose-vllm-$Environment-$locationLower-$Instance".ToLowerInvariant()
 $pipV6      = az network public-ip show --name $pipV6Name --resource-group $rgName 2>$null | ConvertFrom-Json
 $pipV4      = az network public-ip show --name $pipV4Name --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $pipV6) { throw "Public IP '$pipV6Name' not found. Run c-workload/04-Deploy-LlmPublicIp.ps1 first." }
-if (-not $pipV4) { throw "Public IP '$pipV4Name' not found. Run c-workload/04-Deploy-LlmPublicIp.ps1 first." }
+if (-not $pipV6) { throw "Public IP '$pipV6Name' not found." }
+if (-not $pipV4) { throw "Public IP '$pipV4Name' not found." }
 $ipv6Fqdn = $pipV6.dnsSettings.fqdn
 $ipv4Fqdn = $pipV4.dnsSettings.fqdn
 if (-not $ipv6Fqdn -or -not $ipv4Fqdn) { throw "PIPs are missing DNS FQDNs; cert issuance will fail." }
 
 $identityName = "id-$Purpose-vllm-$Environment-$Instance".ToLowerInvariant()
 $identity     = az identity show --name $identityName --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $identity) { throw "Managed identity '$identityName' not found. Run c-workload/03-Deploy-LlmIdentity.ps1 first." }
+if (-not $identity) { throw "Managed identity '$identityName' not found." }
 $uamiResourceId = $identity.id
 $uamiClientId   = $identity.clientId
 
@@ -180,18 +180,18 @@ $uamiClientId   = $identity.clientId
 $coreRgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $kvName     = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 $kv         = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
-if (-not $kv) { throw "Key Vault '$kvName' not found. Run b-shared/02-Deploy-KeyVault.ps1 first." }
+if (-not $kv) { throw "Key Vault '$kvName' not found." }
 
 $apiKeySecretName = 'vllm-api-key'
 $apiKeySecret     = az keyvault secret show --vault-name $kvName --name $apiKeySecretName 2>$null | ConvertFrom-Json
 if (-not ($apiKeySecret -and $apiKeySecret.id)) {
-    throw "Key Vault secret '$apiKeySecretName' is missing in '$kvName'. Run c-workload/02-Deploy-LlmKeyVaultSecret.ps1 first."
+    throw "Key Vault secret '$apiKeySecretName' is missing in '$kvName'."
 }
 
 $diskName = "disk-$Purpose-vllm-models-$Environment-$Instance".ToLowerInvariant()
 $disk     = az disk show --name $diskName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $disk) {
-    throw "Data disk '$diskName' not found. Run c-workload/05-Deploy-LlmDataDisk.ps1 first."
+    throw "Data disk '$diskName' not found."
 }
 $diskId = $disk.id
 

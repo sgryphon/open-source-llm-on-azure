@@ -62,11 +62,14 @@ A central IT function may allocate these resources, or they may be dedicated res
 
 Road warrior VPN gateway, to demonstrate use of a second layer of security.
 
+Host names:
+  * "strongswan-<OrgId>-dev.australiaeast.cloudapp.azure.com"
+  * "strongswan-<OrgId>-dev-ipv4.australiaeast.cloudapp.azure.com"
+
 | Component | Details | Purpose |
 | -- | -- | -- |
-| Managed Identity | id-llm-strongswan-dev-001 | Identity for the VPN gateway server. |
 | Network Security Group | nsg-llm-gateway-dev-001 | Security group for gateway subnet. |
-| VPN Gateway | vmstrongswan001 | Road warrior VPN gateway, to demonstrate use of a second layer of security. |
+| Managed Identity | id-llm-strongswan-dev-001 | Identity for the VPN gateway server. |
 | Public IP | pip-vmstrongswan001-dev-australiaeast-001 | Public IPv6. |
 | Public IP | pipv4-vmstrongswan001-dev-australiaeast-001 | Public IPv4. |
 | Network Interface | nic-01-vmstrongswan-dev-001 | Separate NIC, so that public IP can be retained if server is recreated. |
@@ -89,6 +92,22 @@ The virtual machine is configured to shut down automatically (based on Brisbane,
 
 ## Workload
 
+| Component | Details | Purpose |
+| -- | -- | -- |
+| Network Security Group | nsg-llm-workload-dev-001 | Security group for gateway subnet. |
+| Managed Identity | id-vmvllm001-dev | Identity for the VPN gateway server. |
+
+| VPN Gateway | vmstrongswan001 | Road warrior VPN gateway, to demonstrate use of a second layer of security. |
+| Public IP | pip-vmstrongswan001-dev-australiaeast-001 | Public IPv6. |
+| Public IP | pipv4-vmstrongswan001-dev-australiaeast-001 | Public IPv4. |
+| Network Interface | nic-01-vmstrongswan-dev-001 | Separate NIC, so that public IP can be retained if server is recreated. |
+| Disk | osdiskvmvllm001 | OS disk for the VM. |
+| Virtual Machine | vmvllm001 | vLLM virtual machine. |
+
+The following subnet ranges are allocated:
+
+| Vnet | IPv6 range | IPv4 range | Purpose |
+| snet-llm-workload-dev-australiaeast-001 | `--:0200::/64` | `--.32.0/24` | Workload subnet. |
 
 
 ### Open source large language model (LLM)

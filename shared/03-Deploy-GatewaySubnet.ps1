@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 
 <# .SYNOPSIS
-  Deploy gateway subnet intp hub network.
+  Deploy gateway subnet into the hub network.
 
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
@@ -16,8 +16,6 @@
   This gives subscriptions unique but consistent ranges.
 
 .NOTES
-  This creates a core network in your Azure subscription.
-
   The network is dual stack with an IPv6 /56 Unique Local Address allocation,
   using a default Global ID based on a consistent unique hash of the
   subscription ID, with a default vnet ID, fdxx:xxxx:xxxx:yy00::/56.
@@ -47,7 +45,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./04-Deploy-GatewaySubnet.ps1
+   ./03-Deploy-GatewaySubnet.ps1
 #>
 [CmdletBinding()]
 param (

@@ -67,7 +67,7 @@ Write-Verbose "Deploying LLM/vLLM public IPs for '$Environment' in subscription 
 $rgName       = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
 $rg           = az group show --name $rgName 2>$null | ConvertFrom-Json
 if (-not $rg) {
-    throw "Workload resource group '$rgName' not found. Run a-infrastructure/02-Initialize-WorkloadRg.ps1 first."
+    throw "Workload resource group '$rgName' not found."
 }
 
 $pipV6Name    = "pip-$Purpose-vllm-$Environment-$Region-$Instance".ToLowerInvariant()

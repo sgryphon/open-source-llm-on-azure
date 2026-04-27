@@ -35,7 +35,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./c-workload/05-Deploy-LlmDataDisk.ps1
+   ./c-workload/03-Deploy-LlmDataDisk.ps1
 #>
 [CmdletBinding()]
 param (
@@ -78,7 +78,7 @@ Write-Verbose "Deploying LLM/vLLM model data disk for '$Environment' in subscrip
 $rgName   = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
 $rg       = az group show --name $rgName 2>$null | ConvertFrom-Json
 if (-not $rg) {
-    throw "Workload resource group '$rgName' not found. Run a-infrastructure/02-Initialize-WorkloadRg.ps1 first."
+    throw "Workload resource group '$rgName' not found."
 }
 
 $diskName = "disk-$Purpose-vllm-models-$Environment-$Instance".ToLowerInvariant()

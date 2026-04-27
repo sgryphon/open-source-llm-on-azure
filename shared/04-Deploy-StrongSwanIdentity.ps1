@@ -41,7 +41,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./03-Deploy-VpnIdentity.ps1
+   ./04-Deploy-VpnIdentity.ps1
 #>
 [CmdletBinding()]
 param (
@@ -72,20 +72,23 @@ $ErrorActionPreference = 'Stop'
 $SubscriptionId = $(az account show --query id --output tsv)
 Write-Verbose "Deploying VPN managed identity for '$Purpose' '$Environment' in subscription '$SubscriptionId'"
 
+$appName   = 'strongswan'
+$vmName    = "vm$appName$Instance".ToLowerInvariant()
+
 # Following standard naming conventions from Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-naming
 
 $rgName       = "rg-$Purpose-core-$Instance".ToLowerInvariant()
-$identityName = "id-$Purpose-strongswan-$Environment-$Instance".ToLowerInvariant()
+$identityName = "id-$vmName-$Environment".ToLowerInvariant()
 $kvName       = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 
 # Resolve RG (must already exist) to get location for the identity resource.
 $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
-if (-not $rg) { throw "Resource group '$rgName' not found. Run the infrastructure initialization scripts first." }
+if (-not $rg) { throw "Resource group '$rgName' not found." }
 
 # Confirm the shared Key Vault exists; we grant access to it.
 $kv = az keyvault show --name $kvName --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $kv) { throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first." }
+if (-not $kv) { throw "Key Vault '$kvName' not found." }
 
 # Following standard tagging conventions from Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging

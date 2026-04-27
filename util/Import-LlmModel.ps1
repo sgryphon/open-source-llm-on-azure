@@ -72,7 +72,7 @@ if (-not $vm) { throw "VM '$vmName' not found in '$rgName'." }
 $instance = az vm get-instance-view --name $vmName --resource-group $rgName 2>$null | ConvertFrom-Json
 $powerState = ($instance.instanceView.statuses | Where-Object { $_.code -like 'PowerState/*' } | Select-Object -First 1).code
 if ($powerState -ne 'PowerState/running') {
-    throw "VM '$vmName' is in state '$powerState'. Run c-workload/Start-LlmVm.ps1 first."
+    throw "VM '$vmName' is in state '$powerState'."
 }
 
 Write-Verbose "Will download '$ModelRepoId' into '$ModelMountPoint/$ModelDirName' on '$vmName'."

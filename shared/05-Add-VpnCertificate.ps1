@@ -87,7 +87,7 @@ $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 Write-Verbose "Looking up Key Vault $kvName"
 $kv = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
 if (-not $kv) {
-    throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first (ensure matching -Purpose/-Environment/-OrgId/-Instance)."
+    throw "Key Vault '$kvName' not found."
 }
 
 # Secret-name prefix: `strongswan-<env>-` (lowercase).

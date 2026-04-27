@@ -1,49 +1,51 @@
 #!/usr/bin/env pwsh
 
 <# .SYNOPSIS
-  Deploy the LLM workload subnet and its NSG into the existing workload VNet.
+  Deploy the workload subnet and its NSG into the existing workload VNet.
 
 .DESCRIPTION
-  Creates, idempotently via Azure CLI, inside the workload resource group
-  produced by `a-infrastructure/02-Initialize-WorkloadRg.ps1`:
+  Creates, idempotently via Azure CLI:
 
-    * Network security group `nsg-llm-vllm-<env>-001` with three inbound
-      allow rules:
+    * Network Security Group `nsg-llm-workload-dev-001
 
-        Priority 1000  AllowSshInbound    TCP 22  source *
-        Priority 1010  AllowHttpInbound   TCP 80  source *
-        Priority 1020  AllowHttpsInbound  TCP 443 source *
+  Adds a subnet `subnet-llm-workload-dev-australiaeast-001` to the hub vnet. 
 
-      Default deny-inbound from the platform NSG default chain handles
-      everything else. No outbound rules are added (Azure's default
-      outbound-allow is sufficient for `apt`, `pip`, ACME, NVIDIA, and
-      Hugging Face).
-
-    * Subnet `snet-llm-vllm-<env>-<region>-001` inside the existing workload
-      VNet `vnet-llm-workload-<env>-<region>-001`, dual-stack with an IPv6
-      `/64` and an IPv4 `/27` derived deterministically from `-UlaGlobalId`
-      (the same hash used by `a-infrastructure/02`) and the workload-VNet
-      ID `02` (matching `DEPLOY_WORKLOAD_VNET_ID` default in
-      `a-infrastructure/02`).
-
-      Subnet ID slot `<ss>` is `01` for this subnet; the resulting prefixes
-      are `fd<gg>:<gggg>:<gggggg>:0201::/64` (IPv6) and
-      `10.<gg>.2.32/27` (IPv4).
-
-    * Subnet-NSG association.
+  Addresses are derived deterministically with an IPv6 ULA Global ID 10-hex-character
+  SHA256 prefix of the subscription ID. IPv4 has a 10.x network using the first byte.
+  
+  This gives subscriptions unique but consistent ranges.
 
 .NOTES
-  Idempotency: every `create` is guarded by a `show` pre-check.
+  The network is dual stack with an IPv6 /56 Unique Local Address allocation,
+  using a default Global ID based on a consistent unique hash of the
+  subscription ID, with a default vnet ID, fdxx:xxxx:xxxx:yy00::/56.
 
-  AGENTS.md: dual-stack IPv6 + IPv4, addressing derived deterministically
-  from the subscription id, no hardcoded addresses.
+  The -UlaGlobalId and -VnetId can also be passed in as parameters.
+  For more information on ULAs see https://en.wikipedia.org/wiki/Unique_local_address
+
+  IPv4 addresses use the first byte of the ULA global ID, and the vnet ID to
+  generate a 10.x.y.0/24 virtual network.
+
+  Running these scripts requires the following to be installed:
+  * PowerShell, https://github.com/PowerShell/PowerShell
+  * Azure CLI, https://docs.microsoft.com/en-us/cli/azure/
+
+  You also need to connect to Azure (log in), and set the desired subscription context.
+
+  Follow standard naming conventions from Azure Cloud Adoption Framework, 
+  with an additional organisation or subscription identifier (after app name) in global names 
+  to make them unique.
+  https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-naming
+
+  Follow standard tagging conventions from  Azure Cloud Adoption Framework.
+  https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 .EXAMPLE
 
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./c-workload/01-Deploy-LlmSubnet.ps1
+   ./workload/01-Deploy-LlmSubnet.ps1
 #>
 [CmdletBinding()]
 param (
@@ -61,8 +63,8 @@ param (
     [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
     ## Two-character workload-VNet ID (MUST match the workload-RG/VNet script).
     [string]$WorkloadVnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? '02',
-    ## Two-character subnet ID inside the workload VNet (default `01` for the LLM/vLLM subnet).
-    [string]$SubnetId = $ENV:DEPLOY_LLM_SUBNET_ID ?? '01'
+    ## Two-character subnet ID inside the workload VNet (default `00` for the LLM/vLLM subnet).
+    [string]$SubnetId = $ENV:DEPLOY_WORKLOAD_SUBNET_ID ?? '00'
 )
 
 <#
@@ -93,29 +95,24 @@ $subnetName   = "snet-$Purpose-vllm-$Environment-$Region-$Instance".ToLowerInvar
 
 $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
 if (-not $rg) {
-    throw "Resource group '$rgName' not found. Run a-infrastructure/02-Initialize-WorkloadRg.ps1 first."
+    throw "Resource group '$rgName' not found."
 }
 $vnet = az network vnet show --name $vnetName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $vnet) {
-    throw "Workload VNet '$vnetName' not found in '$rgName'. Run a-infrastructure/02-Initialize-WorkloadRg.ps1 first."
+    throw "Workload VNet '$vnetName' not found in '$rgName'."
 }
 
 # Derive subnet prefixes deterministically from UlaGlobalId, WorkloadVnetId, SubnetId.
-# UlaGlobalId = gg gggg gggggg (10 hex chars: 2 + 4 + 4)
-# Note: the project's per-subnet pattern uses the second-half group as
-# `:<vv><ss>::/64`, so we concatenate WorkloadVnetId and SubnetId in that
-# slot. With the default workload VNet ID '02' and subnet ID '01' the
-# group becomes '0201'.
 $prefix          = "fd$($UlaGlobalId.Substring(0, 2)):$($UlaGlobalId.Substring(2, 4)):$($UlaGlobalId.Substring(6))"
 $subnetIPv6Addr  = [IPAddress]"$($prefix):$($WorkloadVnetId)$($SubnetId)::"
 $subnetIPv6      = "$subnetIPv6Addr/64"
 
-# IPv4: 10.<gg-dec>.<vv-dec>.<ss*32>/27 — same shape as gateway-subnet.
-$prefixByte      = [int]"0x$($UlaGlobalId.Substring(0, 2))"
-$prefixLength    = 27
-$subnetBits      = 32 - $prefixLength
-$subnetIdMask    = [Math]::Pow(2, 8 - $subnetBits) - 1
-$subnetIPv4      = "10.$prefixByte.$("0x" + $WorkloadVnetId -bAnd 0xFF).$(("0x" + $SubnetId -bAnd $subnetIdMask) -shl $subnetBits)/$prefixLength"
+# Use the first byte of the ULA Global ID, and the vnet ID (as decimal)
+$prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
+$decVnet = [int]("0x$WorkloadVnetId" -bAnd 0xf) -shl 4
+$decSubnet = [int]("0x$SubnetId" -bAnd 0xf)
+
+$subnetIPv4 = "10.$prefixByte.$($decVnet + $decSubnet).0/24"
 
 Write-Verbose "Subnet prefixes: IPv6=$subnetIPv6, IPv4=$subnetIPv4"
 

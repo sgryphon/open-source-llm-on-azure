@@ -116,10 +116,13 @@ if ([string]::IsNullOrWhiteSpace($VpnUserPassword)) {
 $SubscriptionId = $(az account show --query id --output tsv)
 Write-Verbose "Deploying strongSwan VM for environment '$Environment' in subscription '$SubscriptionId'$($AddPublicIpv4 ? ' with IPv4' : '')"
 
+$appName   = 'strongswan'
+$vmName    = "vm$appName$Instance".ToLowerInvariant()
+
 # Resolve the shared RG, VNet, gateway subnet, gateway NSG, Key Vault.
 $rgName            = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $rg                = az group show --name $rgName 2>$null | ConvertFrom-Json
-if (-not $rg) { throw "Resource group '$rgName' not found. Run a-infrastructure scripts first." }
+if (-not $rg) { throw "Resource group '$rgName' not found." }
 $location          = $rg.location
 $locationLower     = $location.ToLowerInvariant()
 
@@ -128,23 +131,23 @@ $gatewayNsgName    = "nsg-$Purpose-gateway-$Environment-001".ToLowerInvariant()
 $gatewaySubnetName = "snet-$Purpose-gateway-$Environment-$location-001".ToLowerInvariant()
 
 $vnet    = az network vnet show --name $vnetName --resource-group $rgName 2>$null | ConvertFrom-Json
-if (-not $vnet) { throw "VNet '$vnetName' not found. Run the core-RG initialization script first." }
+if (-not $vnet) { throw "VNet '$vnetName' not found." }
 
 $gwSnet  = az network vnet subnet show --name $gatewaySubnetName -g $rgName --vnet-name $vnetName 2>$null | ConvertFrom-Json
-if (-not $gwSnet) { throw "Gateway subnet '$gatewaySubnetName' not found. Run the gateway-subnet script first." }
+if (-not $gwSnet) { throw "Gateway subnet '$gatewaySubnetName' not found." }
 
 $gwNsg   = az network nsg show --name $gatewayNsgName -g $rgName 2>$null | ConvertFrom-Json
-if (-not $gwNsg) { throw "Gateway NSG '$gatewayNsgName' not found. Run the gateway-subnet script first." }
+if (-not $gwNsg) { throw "Gateway NSG '$gatewayNsgName' not found." }
 
 $kvName  = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 $kv      = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
-if (-not $kv) { throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first." }
+if (-not $kv) { throw "Key Vault '$kvName' not found." }
 
 # Resolve the shared VPN user-assigned managed identity.
-$identityName = "id-$Purpose-strongswan-$Environment-$Instance".ToLowerInvariant()
+$identityName = "id-$vmName-$Environment".ToLowerInvariant()
 $identity     = az identity show --name $identityName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $identity) {
-    throw "Managed identity '$identityName' not found. Run the VPN-identity script first."
+    throw "Managed identity '$identityName' not found."
 }
 $uamiResourceId = $identity.id
 $uamiClientId   = $identity.clientId
@@ -154,9 +157,7 @@ if (-not $uamiResourceId -or -not $uamiClientId) {
 Write-Verbose "Resolved shared resources: RG=$rgName, VNet=$vnetName, Subnet=$gatewaySubnetName, NSG=$gatewayNsgName, KV=$kvName, UAMI=$identityName"
 
 # Derived names and addressing.
-$appName   = 'strongswan'
-$vmName    = "vm$appName$Instance".ToLowerInvariant()
-$vmOsDisk  = "osdiskvm$appName$Instance".ToLowerInvariant()
+$vmOsDisk  = "osdisk$vmName".ToLowerInvariant()
 $nicName   = "nic-01-$vmName-$Environment-$Instance".ToLowerInvariant()
 $ipcV4Name = 'ipconfig1'  # Azure auto-creates this on the NIC; we update it.
 $ipcV6Name = "ipc-v6-$vmName-$Environment-$Instance".ToLowerInvariant()
@@ -212,7 +213,7 @@ Write-Verbose "Verifying Key Vault secrets from the certificate-deployment scrip
 foreach ($name in @($caSecretName, $serverCertSecretName, $serverKeySecretName)) {
     $s = az keyvault secret show --vault-name $kvName --name $name 2>$null | ConvertFrom-Json
     if (-not ($s -and $s.value)) {
-        throw "Key Vault secret '$name' is missing in '$kvName'. Run the certificate-deployment script first."
+        throw "Key Vault secret '$name' is missing in '$kvName'."
     }
     Write-Verbose "  OK: $name"
 }
