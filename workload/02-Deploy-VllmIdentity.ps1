@@ -28,7 +28,7 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./c-workload/02-Deploy-LlmIdentity.ps1
+   ./c-workload/02-Deploy-VllmIdentity.ps1
 #>
 [CmdletBinding()]
 param (

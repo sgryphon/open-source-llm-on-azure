@@ -96,6 +96,7 @@ The virtual machine is configured to shut down automatically (based on Brisbane,
 | -- | -- | -- |
 | Network Security Group | nsg-llm-workload-dev-001 | Security group for gateway subnet. |
 | Managed Identity | id-vmvllm001-dev | Identity for the VPN gateway server. |
+| Disk | diskmodels001 | Data disk for model download; can detach and persist if server recreated. |
 
 | VPN Gateway | vmstrongswan001 | Road warrior VPN gateway, to demonstrate use of a second layer of security. |
 | Public IP | pip-vmstrongswan001-dev-australiaeast-001 | Public IPv6. |

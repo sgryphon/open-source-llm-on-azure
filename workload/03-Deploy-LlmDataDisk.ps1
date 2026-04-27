@@ -4,31 +4,28 @@
   Deploy the persistent Managed Disk that holds the vLLM model weights.
 
 .DESCRIPTION
-  Creates, idempotently via Azure CLI, a standalone Managed Disk
-  `disk-llm-vllm-models-<env>-001` in the workload resource group:
+  Creates, idempotently via Azure CLI:
+  
+    * Standalone Managed Disk `disk-vllm-models-dev-001` in the workload resource group.
 
-    * SKU: `StandardSSD_LRS` (cheapest tier that survives detach).
-    * Size: 8 GiB (Qwen2.5-Coder-7B-Instruct AWQ-INT4 fits in ~5.5 GiB
-      on disk; the headroom covers the ext4 filesystem overhead and a
-      future second model directory).
-    * Created standalone — never as part of `az vm create
-      --data-disk-sizes-gb`. The disk's lifecycle is independent of any
-      VM, which is the whole point: rebuilding the VM (`util/Detach-
-      LlmModelDisk.ps1 -DeleteVm` followed by re-running `06-Deploy-
-      LlmVm.ps1`) reattaches the same disk and avoids re-downloading
-      ~5.5 GiB from Hugging Face every time.
+  The disk is populated with the model after initial virtual machine creation.
 
-  On re-run with the disk already present this script exits 0 without
-  touching it: no resize, no SKU change, no tag rewrite. Resizing or
-  retyping a populated model disk is destructive enough that doing it
-  silently as a side-effect of a redeploy would be a footgun; if the
-  operator wants either, they remove the disk explicitly first.
+  The disk can be detached from the virtual and retained when recreating the virtual machine.
 
 .NOTES
-  The disk is filesystem-formatted by cloud-init on first VM boot
-  (`mkfs.ext4 -L llm-models`), guarded by a `blkid` check so subsequent
-  reattaches do not reformat. The model files are written by
-  `util/Download-LlmModelToDisk.ps1` after the VM is up.
+  Running these scripts requires the following to be installed:
+  * PowerShell, https://github.com/PowerShell/PowerShell
+  * Azure CLI, https://docs.microsoft.com/en-us/cli/azure/
+
+  You also need to connect to Azure (log in), and set the desired subscription context.
+
+  Follow standard naming conventions from Azure Cloud Adoption Framework,
+  with an additional organisation or subscription identifier (after app name) in global names
+  to make them unique.
+  https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-naming
+
+  Follow standard tagging conventions from Azure Cloud Adoption Framework.
+  https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 .EXAMPLE
 
@@ -81,7 +78,8 @@ if (-not $rg) {
     throw "Workload resource group '$rgName' not found."
 }
 
-$diskName = "disk-$Purpose-vllm-models-$Environment-$Instance".ToLowerInvariant()
+$appName = "models"
+$diskName = "disk$appName$Instance".ToLowerInvariant()
 Write-Verbose "Disk name : $diskName"
 Write-Verbose "Size      : ${SizeGiB} GiB"
 Write-Verbose "SKU       : $Sku"
