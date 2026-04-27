@@ -8,14 +8,10 @@
 
     * Resource group `rg-llm-workload-dev-001`
     * Virtual network `vnet-llm-workload-dev-australiaeast-001`, dual-stack
-    * Peering `peer-llm-workload-dev-to-hub`    (workload VNet side)   -- allow-forwarded-traffic true
-    * Peering `peer-llm-hub-to-workload-dev`    (hub VNet side)        -- allow-forwarded-traffic true
+    * Two-way peering `peer-llm-workload-dev-to-hub` and `peer-llm-hub-to-workload-dev`
 
   Addresses are derived deterministically with an IPv6 ULA Global ID 10-hex-character
   SHA256 prefix of the subscription ID. IPv4 has a 10.x network using the first byte.
-
-  Peerings are guarded with `az network vnet peering show` so the script is
-  re-runnable.
 
 .NOTES
   This creates a worload network in your Azure subscription.
@@ -28,7 +24,7 @@
   For more information on ULAs see https://en.wikipedia.org/wiki/Unique_local_address
 
   IPv4 addresses use the first byte of the ULA global ID, and the vnet ID to
-  generate a 10.x.y.0/24 virtual network.
+  generate a 10.x.y.0/20 virtual network.
 
   Running these scripts requires the following to be installed:
   * PowerShell, https://github.com/PowerShell/PowerShell
@@ -113,7 +109,8 @@ $vnetIpPrefix = "$vnetAddress/56"
 
 # Use the first byte of the ULA Global ID, and the vnet ID (as decimal)
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
-$vnetIPv4 = "10.$prefixByte.$("0x" + $VnetId -bAnd 0xFF).0/24"
+$decVnet = [int]("0x$VnetId" -bAnd 0xf) -shl 4
+$vnetIPv4 = "10.$prefixByte.$decVnetId.0/20"
 
 # Following standard tagging conventions from  Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging

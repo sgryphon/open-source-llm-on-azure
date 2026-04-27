@@ -81,8 +81,6 @@ param (
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
     ## Identifier for the organisation (or subscription) to make global names unique.
     [string]$OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))",
-    ## Azure location whose cloudapp.azure.com subdomain the VM FQDNs use.
-    [string]$Location = $ENV:DEPLOY_LOCATION ?? 'australiaeast',
     ## Instance number uniquifier for the Key Vault (matches the Key Vault deployment script).
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
     ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4").
@@ -104,7 +102,6 @@ $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))"
 $Location = $ENV:DEPLOY_LOCATION ?? 'australiaeast'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
-$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL
 $AddPublicIpv4 = $true
 $TempPath = $ENV:DEPLOY_TEMP_PATH
 #>
@@ -120,22 +117,24 @@ Write-Verbose "Generating strongSwan cert material for environment '$Environment
 
 # Key Vault name: must match the Key Vault deployment script.
 $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
-Write-Verbose "Target Key Vault: $kvName"
+
+Write-Verbose "Looking up Key Vault $kvName"
+$kv = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
+if (-not $kv) {
+    throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first (ensure matching -Purpose/-Environment/-OrgId/-Instance)."
+}
 
 # Secret-name prefix: `strongswan-<env>-` (lowercase).
 $secretPrefix = "strongswan-$($Environment.ToLowerInvariant())"
 Write-Verbose "Key Vault secret prefix: $secretPrefix-*"
 
 # DNS label stem defaults to `strongswan-<OrgId>-<Environment>`.
-if (-not $ServerDnsLabel) {
-    $ServerDnsLabel = "strongswan-$OrgId-$Environment".ToLowerInvariant()
-}
-Write-Verbose "Server DNS label stem: $ServerDnsLabel"
+$serverDnsLabel = "strongswan-$OrgId-$Environment".ToLowerInvariant()
 
 # Derive IPv6 / IPv4 PIP FQDNs from parameters
-$locationLower = $Location.ToLowerInvariant()
-$ipv6Fqdn = "$ServerDnsLabel.$locationLower.cloudapp.azure.com".ToLowerInvariant()
-$ipv4Fqdn = "$ServerDnsLabel-ipv4.$locationLower.cloudapp.azure.com".ToLowerInvariant()
+$locationLower = $kv.location.ToLowerInvariant()
+$ipv6Fqdn = "$serverDnsLabel.$locationLower.cloudapp.azure.com".ToLowerInvariant()
+$ipv4Fqdn = "$serverDnsLabel-ipv4.$locationLower.cloudapp.azure.com".ToLowerInvariant()
 $fqdnList = @($ipv6Fqdn)
 if ($AddPublicIpv4) { $fqdnList += $ipv4Fqdn }
 Write-Verbose "Server cert SAN FQDNs: $($fqdnList -join ', ')"
@@ -329,12 +328,6 @@ else {
 # 4. Key Vault upload (idempotent).
 # ---------------------------------------------------------------------------
 
-Write-Verbose "Looking up Key Vault $kvName"
-$kv = az keyvault show --name $kvName 2>$null | ConvertFrom-Json
-if (-not $kv) {
-    throw "Key Vault '$kvName' not found. Run the Key Vault deployment script first (ensure matching -Purpose/-Environment/-OrgId/-Instance)."
-}
-
 # Helper: upload a file as a Key Vault secret iff the name has no current value.
 function Set-KvSecretIfAbsent {
     param(
@@ -397,20 +390,6 @@ Set-KvSecretValueIfAbsent -VaultName $kvName -Name $clientP12PwdSecretName -Valu
 # The CA *private* key is not uploaded.
 # The CA key stays only in ./temp/ so the local user can re-issue keys if needed.
 
-# Verify: all five expected secrets now exist.
-Write-Verbose "Confirming Key Vault secrets:"
-$secretList = az keyvault secret list --vault-name $kvName --query "[?starts_with(name, '$secretPrefix-')].name" --output tsv
-$expected = @(
-    $caCertSecretName, $serverCertSecretName, $serverKeySecretName,
-    $clientP12SecretName, $clientP12PwdSecretName
-)
-foreach ($name in $expected) {
-    if ($secretList -notcontains $name) {
-        throw "Expected Key Vault secret '$name' missing after upload."
-    }
-    Write-Verbose "  present: $name"
-}
-
 Write-Verbose "Deploy strongSwan certificate material complete."
 
 Write-Output "strongSwan cert material ready in '$TempPath' and Key Vault '$kvName':"
@@ -419,5 +398,3 @@ Write-Output "  Server cert        : $serverCertSecretName"
 Write-Output "  Server key         : $serverKeySecretName"
 Write-Output "  Client 001 PKCS#12 : $clientP12SecretName (base64)"
 Write-Output "  Client 001 P12 pwd : $clientP12PwdSecretName"
-Write-Output ""
-Write-Output "Next: run the strongSwan VM deployment script with -VpnUserPassword <pwd>"

@@ -115,13 +115,10 @@ $gatewaySubnetIpPrefix = "$gatewaySubnetAddress/64"
 
 # Use the first byte of the ULA Global ID, and the vnet ID (as decimal)
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
-$vnetIPv4 = "10.$prefixByte.$($VnetId -bAnd 0xFF).0/24"
+$decVnet = [int]("0x$VnetId" -bAnd 0xf) -shl 4
+$decSubnet = [int]("0x$SubnetId" -bAnd 0xf)
 
-# Use `/27` subnet, inside `/24` vnet, allowing 3 bits for subnet (8 per vnet), each with 5 bits for 32 addresses
-$prefixLength = 27
-$subnetBits = 32 - $prefixLength
-$subnetIdMask = [Math]::Pow(2, 8 - $subnetBits) - 1
-$gatewaySubnetIPv4 = "10.$prefixByte.$("0x" + $VnetId -bAnd 0xFF).$(("0x" + $SubnetId -bAnd $subnetIdMask) -shl $subnetBits)/$prefixLength"
+$gatewaySubnetIPv4 = "10.$prefixByte.$($decVnet + $decSubnet).0/24"
 
 # Following standard tagging conventions from  Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging

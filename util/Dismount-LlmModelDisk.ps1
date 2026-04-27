@@ -44,12 +44,14 @@
 #>
 [CmdletBinding()]
 param (
-    ## Also delete the VM (and its OS disk and NIC) after detaching the data disk.
-    [switch]$DeleteVm = ($ENV:DEPLOY_DELETE_VM -eq 'true' -or $ENV:DEPLOY_DELETE_VM -eq '1'),
-    [string]$Purpose     = $ENV:DEPLOY_PURPOSE     ?? 'LLM',
-    [string]$Workload    = $ENV:DEPLOY_WORKLOAD    ?? 'workload',
+    ## Purpose prefix (matches `a-infrastructure/`).
+    [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
+    ## Workload prefix (matches `a-infrastructure/02-Initialize-WorkloadRg.ps1`).
+    [string]$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
+    ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
-    [string]$Instance    = $ENV:DEPLOY_INSTANCE    ?? '001'
+    ## Instance number uniquifier (matches `a-infrastructure/`).
+    [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,24 +107,6 @@ if ($attached) {
     if ($LASTEXITCODE -ne 0) { throw "az vm disk detach '$diskName' failed." }
 } else {
     Write-Verbose "Data disk '$diskName' is not attached to '$vmName'; nothing to detach."
-}
-
-# 3. Optionally delete the VM. NEVER touches the data disk.
-if ($DeleteVm) {
-    Write-Verbose "Deleting VM '$vmName' (data disk '$diskName' will remain in '$rgName') ..."
-    az vm delete --name $vmName --resource-group $rgName --yes --output none
-    if ($LASTEXITCODE -ne 0) { throw "az vm delete '$vmName' failed." }
-    Write-Verbose "VM '$vmName' deleted. Data disk '$diskName' is preserved."
-} else {
-    Write-Verbose "VM '$vmName' kept (pass -DeleteVm to also delete the VM)."
-}
-
-# Final invariant check.
-$diskAfter = az disk show --name $diskName --resource-group $rgName 2>$null | ConvertFrom-Json
-if ($diskAfter) {
-    Write-Verbose "Data disk '$diskName' state after detach: $($diskAfter.diskState)"
-} else {
-    throw "INVARIANT VIOLATION: data disk '$diskName' no longer exists. This script must never delete the data disk; investigate immediately."
 }
 
 Write-Verbose "Detach LLM/vLLM model disk complete."

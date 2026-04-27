@@ -148,4 +148,3 @@ if ($rcStdout -notmatch 'DOWNLOAD_OK') {
 
 Write-Verbose ""
 Write-Verbose "Model is on disk and vllm.service is active."
-Write-Verbose "Run c-workload/07-Test-LlmEndpoint.ps1 to verify the endpoint."

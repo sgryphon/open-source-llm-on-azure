@@ -26,12 +26,6 @@
   emits a warning -- staging certs are not trusted by `Invoke-RestMethod`
   out of the box.
 
-.NOTES
-  Prerequisite: `util/Download-LlmModelToDisk.ps1` has been run at least
-  once and `vllm.service` is `active` on the VM. If the model has not
-  been loaded the GET to `/v1/models` will fail at the TCP level; the
-  script emits a hint pointing at the model-download script.
-
 .EXAMPLE
 
   az login

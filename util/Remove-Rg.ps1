@@ -27,5 +27,5 @@ $workloadRgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvarian
 
 # Remove in reverse order
 
-az group delete --name $workloadRgName
-az group delete --name $coreRgName
+az group delete --name $workloadRgName --yes
+az group delete --name $coreRgName --yes

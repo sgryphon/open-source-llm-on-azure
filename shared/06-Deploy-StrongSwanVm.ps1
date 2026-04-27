@@ -72,12 +72,12 @@ param (
     [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_D2s_v6',
     ## Linux admin account name (authentication via SSH key).
     [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser',
-    ## Two-character VPN vnet id (addressing slot, not an Azure VNet).
-    [string]$VpnVnetId = $ENV:DEPLOY_VPN_VNET_ID ?? '02',
     ## Ten-character IPv6 ULA Global ID (MUST match the gateway-subnet script).
     [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
-    ## Public-IP DNS label stem (IPv6 uses this as-is; IPv4 appends "-ipv4"). Must match the gateway-subnet script.
-    [string]$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL,
+    ## Two character IPv6 Unique Local Address vnet ID to use for core subnet (default 03)
+    [string]$PoolVnetId = $ENV:DEPLOY_POOL_VNET_ID ?? ("03"),
+    ## Two character subnet id for VPN clients (default 00)
+    [string]$PoolSubnetId = $ENV:DEPLOY_POOL_SUBNET_ID ?? '00',
     ## Auto-shutdown time in UTC, default 0900 = 19:00 in Brisbane. Empty string disables.
     [string]$ShutdownUtc = $ENV:DEPLOY_SHUTDOWN_UTC ?? '0900',
     ## Email to send auto-shutdown notification to (optional).
@@ -101,7 +101,6 @@ $VpnUsername = $ENV:DEPLOY_VPN_USERNAME ?? 'vpnuser'
 $VpnUserPassword = $ENV:DEPLOY_VPN_USER_PASSWORD
 $VpnVnetId = $ENV:DEPLOY_VPN_VNET_ID ?? '02'
 $UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10)
-$ServerDnsLabel = $ENV:DEPLOY_VPN_DNS_LABEL
 $ShutdownUtc = '0900'
 $ShutdownEmail = ''
 $AddPublicIpv4 = $true
@@ -163,9 +162,7 @@ $ipcV6Name = "ipc-v6-$vmName-$Environment-$Instance".ToLowerInvariant()
 $pipV6Name = "pip-$vmName-$Environment-$location-$Instance".ToLowerInvariant()
 $pipV4Name = "pipv4-$vmName-$Environment-$location-$Instance".ToLowerInvariant()
 
-if (-not $ServerDnsLabel) {
-    $ServerDnsLabel = "strongswan-$OrgId-$Environment".ToLowerInvariant()
-}
+$ServerDnsLabel = "strongswan-$OrgId-$Environment".ToLowerInvariant()
 $pipV6DnsLabel = $ServerDnsLabel.ToLowerInvariant()
 $pipV4DnsLabel = "$ServerDnsLabel-ipv4".ToLowerInvariant()
 
@@ -181,18 +178,21 @@ Write-Verbose "Server FQDNs: $($fqdnList -join ', ')"
 # UlaGlobalId = gg gggg gggg (10 hex chars). VpnVnetId is 2 hex chars.
 $prefix = "fd$($UlaGlobalId.Substring(0, 2)):$($UlaGlobalId.Substring(2, 4)):$($UlaGlobalId.Substring(6))"
 
-# IPv6 subnet: fd<gg>:<gggg>:<gggg>:<VpnVnetId>00::/64
-$vnetAddress   = [IPAddress]"$($prefix):$($VpnVnetId)00::"
-$vpnSubnetIPv6 = "$vnetAddress/64"
+# IPv6 subnet: fd<gg>:<gggg>:<gggg>:<VpnVnetId>::/64
+$poolSubnetAddress = [IPAddress]"$($prefix):$($PoolVnetId)$($PoolSubnetId)::"
+$poolSubnetIpPrefix = "$gatewaySubnetAddress/64"
+
 # IPv6 pool: /116 at ::1000 inside the /64.
-$poolBase    = [IPAddress]"$($prefix):$($VpnVnetId)00::1000"
-$vipPoolIPv6 = "$poolBase/116"
+$poolBase    = [IPAddress]"$($prefix):$($PoolVnetId)$($PoolSubnetId)::1000"
+$vipPoolIPv6 = "$poolSubnetAddrress/116"
 
 # IPv4: 10.<ggDec>.<vpnVnetDec>.0/24 ; pool = upper half /25 at .128.
 $prefixByte = [int]"0x$($UlaGlobalId.Substring(0, 2))"
-$vpnVnetDec  = [int]"0x$VpnVnetId"
-$vpnSubnetIPv4 = "10.$prefixByte.$vpnVnetDec.0/24"
-$vipPoolIPv4   = "10.$prefixByte.$vpnVnetDec.128/25"
+$decVnet = [int]("0x$PoolVnetId" -bAnd 0xf) -shl 4
+$decSubnet = [int]("0x$PoolSubnetId" -bAnd 0xf)
+
+$poolSubnetIPv4 = "10.$prefixByte.$($decVnet + $decSubnet).0/24"
+$vipPoolIPv4    = "10.$prefixByte.$($decVnet + $decSubnet).128/25"
 
 Write-Verbose "VPN subnets: IPv4=$vpnSubnetIPv4, IPv6=$vpnSubnetIPv6"
 Write-Verbose "VPN pools  : IPv4=$vipPoolIPv4, IPv6=$vipPoolIPv6"
