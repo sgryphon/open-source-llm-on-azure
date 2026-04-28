@@ -8,6 +8,8 @@
 
     * User-assigned managed identity `id-vllm-dev-001`
 
+  Assigns identity permissions to read keyvault
+
 .NOTES
   Running these scripts requires the following to be installed:
   * PowerShell, https://github.com/PowerShell/PowerShell
@@ -66,17 +68,14 @@ $vmName    = "vm$appName$Instance".ToLowerInvariant()
 
 # Workload RG hosts the UAMI; shared core RG hosts the Key Vault.
 $workloadRgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
-$coreRgName     = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $identityName = "id-$vmName-$Environment".ToLowerInvariant()
-$kvName         = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
+
+$coreRgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
+$kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 
 $workloadRg = az group show --name $workloadRgName 2>$null | ConvertFrom-Json
 if (-not $workloadRg) {
     throw "Workload resource group '$workloadRgName' not found."
-}
-$kv = az keyvault show --name $kvName --resource-group $coreRgName 2>$null | ConvertFrom-Json
-if (-not $kv) {
-    throw "Shared Key Vault '$kvName' not found in '$coreRgName'."
 }
 
 # CAF tags (matches the design's tag table for this workload).
@@ -90,9 +89,7 @@ $TagDictionary = [ordered]@{
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }
 
-# ---------------------------------------------------------------------------
-# 1. UAMI (idempotent).
-# ---------------------------------------------------------------------------
+# Create UAMI
 
 Write-Verbose "Ensuring user-assigned managed identity '$identityName' in '$workloadRgName'"
 $existingIdentity = az identity show --name $identityName --resource-group $workloadRgName 2>$null | ConvertFrom-Json
@@ -111,12 +108,17 @@ if ($existingIdentity) {
     }
 }
 
-$principalId = $identity.principalId
-$clientId    = $identity.clientId
-$identityId  = $identity.id
-if (-not $principalId) { throw "Managed identity '$identityName' has no principalId." }
-Write-Verbose "Identity principalId: $principalId"
-Write-Verbose "Identity clientId:    $clientId"
-Write-Verbose "Identity resourceId:  $identityId"
+# Assign Key Vault permissions
+
+Write-Verbose "Granting 'get, list' secret permissions on '$kvName' to identity '$identityName' ($principalId)"
+az keyvault set-policy `
+    --name $kvName `
+    --resource-group $coreRgName `
+    --object-id $principalId `
+    --secret-permissions get list `
+    --output none
+if ($LASTEXITCODE -ne 0) { throw "az keyvault set-policy failed for identity '$identityName' on '$kvName'" }
+
+$identity | Format-List principalId, clientId, id
 
 Write-Verbose "Deploy LLM/vLLM managed identity '$identityName' complete."

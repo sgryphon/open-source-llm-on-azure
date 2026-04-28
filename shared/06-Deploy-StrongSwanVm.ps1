@@ -72,18 +72,18 @@ param (
     [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_D2s_v6',
     ## Linux admin account name (authentication via SSH key).
     [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser',
-    ## Ten-character IPv6 ULA Global ID (MUST match the gateway-subnet script).
-    [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
-    ## Two character IPv6 Unique Local Address vnet ID to use for core subnet (default 03)
-    [string]$PoolVnetId = $ENV:DEPLOY_POOL_VNET_ID ?? ("03"),
-    ## Two character subnet id for VPN clients (default 00)
-    [string]$PoolSubnetId = $ENV:DEPLOY_POOL_SUBNET_ID ?? '00',
     ## Auto-shutdown time in UTC, default 0900 = 19:00 in Brisbane. Empty string disables.
     [string]$ShutdownUtc = $ENV:DEPLOY_SHUTDOWN_UTC ?? '0900',
     ## Email to send auto-shutdown notification to (optional).
     [string]$ShutdownEmail = $ENV:DEPLOY_SHUTDOWN_EMAIL ?? '',
     ## Add a public IPv4 in addition to the IPv6. MUST match the gateway-subnet run.
-    [switch]$AddPublicIpv4 = ([string]::IsNullOrEmpty($ENV:DEPLOY_ADD_IPV4) -or $ENV:DEPLOY_ADD_IPV4 -eq 'true' -or $ENV:DEPLOY_ADD_IPV4 -eq '1')
+    [switch]$AddPublicIpv4 = ([string]::IsNullOrEmpty($ENV:DEPLOY_ADD_IPV4) -or $ENV:DEPLOY_ADD_IPV4 -eq 'true' -or $ENV:DEPLOY_ADD_IPV4 -eq '1'),
+    ## Ten-character IPv6 ULA Global ID (MUST match the gateway-subnet script).
+    [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
+    ## Two character IPv6 Unique Local Address vnet ID to use for core subnet (default 03)
+    [string]$PoolVnetId = $ENV:DEPLOY_POOL_VNET_ID ?? ("03"),
+    ## Two character subnet id for VPN clients (default 00)
+    [string]$PoolSubnetId = $ENV:DEPLOY_POOL_SUBNET_ID ?? '00'
 )
 
 <#

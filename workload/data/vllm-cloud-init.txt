@@ -1,38 +1,18 @@
 #cloud-config
 # vLLM OpenAI-compatible inference server on a single Ubuntu 22.04 VM.
 #
-# This file is a template. `c-workload/06-Deploy-LlmVm.ps1` substitutes
-# every `#INIT_*#` token before passing the result to `az vm create
-# --custom-data`. If you see a `#INIT_*#` token at boot time, the render
-# step failed its post-render assertion; check the PowerShell script
-# output.
-#
 # The VM fetches its API key from Key Vault via its user-assigned managed
 # identity at first boot -- nothing private is substituted into this file
-# by the PowerShell script. The model bytes are NOT downloaded by cloud-
-# init: they are placed onto the persistent data disk later by
-# `util/Download-LlmModelToDisk.ps1`, which is the operator's deliberate
-# next step after this VM comes up.
-#
-# Boot ordering on the happy path:
-#
-#   1. Format/mount the data disk at /opt/models (mkfs only if blank).
-#   2. Create the `vllm` system user.
-#   3. Log in with the UAMI; fetch the API key into /etc/vllm/vllm.env.
-#   4. Create /opt/vllm/.venv and `pip install vllm==<pinned>`.
-#   5. setcap so the venv's python can bind :443 as non-root.
-#   6. Issue a Let's Encrypt cert (HTTP-01 standalone) for both FQDNs.
-#   7. Install the renewal deploy hook; copy initial cert into /etc/vllm/certs.
-#   8. systemctl daemon-reload && enable vllm.service (do NOT start --
-#      the unit's ConditionPathExists keeps it inactive until the model
-#      is loaded onto /opt/models by the operator's util script).
+# by the PowerShell script.
+
+# The model bytes are NOT downloaded by cloud-init: they are placed onto
+# the persistent data disk later.
 
 apt:
   conf: |
     Acquire::Retries "60";
     DPkg::Lock::Timeout "60";
-  # Add Microsoft's apt repo for the Azure CLI (used at first boot to
-  # `az login --identity` and pull the API key from Key Vault).
+  # Add Microsoft's apt repo for the Azure CLI
   sources:
     azure-cli.list:
       source: "deb [arch=amd64 signed-by=$KEY_FILE] https://packages.microsoft.com/repos/azure-cli/ $RELEASE main"
@@ -52,10 +32,7 @@ packages:
   - azure-cli
 
 write_files:
-  # Certbot deploy hook: copies renewed cert material into /etc/vllm/certs
-  # and restarts vllm.service. Fires on initial issuance (invoked
-  # explicitly below) and on every successful renewal driven by the
-  # certbot.timer systemd unit.
+  # Certbot deploy hook: copies renewed cert material into /etc/vllm/certs and restarts vllm.service.
   - path: /etc/letsencrypt/renewal-hooks/deploy/10-vllm-restart.sh
     owner: root:root
     permissions: '0755'
@@ -74,8 +51,7 @@ write_files:
 
   # systemd unit for vLLM. ConditionPathExists keeps the unit inactive
   # (silently, no error) until util/Download-LlmModelToDisk.ps1 places
-  # the model files. After that script runs `systemctl start vllm`, the
-  # unit comes up and stays up across reboots.
+  # the model files.
   - path: /etc/systemd/system/vllm.service
     owner: root:root
     permissions: '0644'
@@ -107,8 +83,7 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 
-  # First-boot bootstrap script. Everything sequencing-sensitive lives
-  # here so we can rerun it by hand if needed for debugging.
+  # First-boot bootstrap script.
   - path: /usr/local/sbin/vllm-bootstrap.sh
     owner: root:root
     permissions: '0755'
@@ -121,10 +96,8 @@ write_files:
       UAMI_CLIENT_ID='#INIT_UAMI_CLIENT_ID#'
       VLLM_VERSION='#INIT_VLLM_VERSION#'
       MODEL_MOUNT='#INIT_MODEL_MOUNT_POINT#'
-      HOST_NAME='#INIT_HOST_NAME#'
-      HOST_NAME_IPV4='#INIT_HOST_NAME_IPV4#'
+      HOST_NAMES='#INIT_HOST_NAMES#'
       CERT_EMAIL='#INIT_CERT_EMAIL#'
-      ACME_STAGING_FLAG='#INIT_ACME_STAGING_FLAG#'
 
       # 1. Find the data disk and prepare /opt/models.
       #
@@ -217,9 +190,8 @@ write_files:
       # for staging.
       certbot certonly --standalone --preferred-challenges http \
           --cert-name vllm-cert \
-          -d "$HOST_NAME" -d "$HOST_NAME_IPV4" \
-          -n --agree-tos -m "$CERT_EMAIL" \
-          ${ACME_STAGING_FLAG}
+          -d "$HOST_NAMES" \
+          -n --agree-tos -m "$CERT_EMAIL"
 
       # 8. Run the deploy hook explicitly so the initial cert lands in
       # /etc/vllm/certs without waiting for the first renewal. The hook
