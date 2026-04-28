@@ -79,6 +79,7 @@ Host names:
 The following subnet ranges are allocated:
 
 | Vnet | IPv6 range | IPv4 range | Purpose |
+| -- | -- | -- | -- |
 | snet-llm-gateway-dev-australiaeast-001 | `--:0100::/64` | `--.16.0/24` | VPN gateway subnet. |
 | VPN Clients | `--:300::/64` | `--.48.0/24` | Subnet for VPN client pool. |
 
@@ -95,7 +96,7 @@ The virtual machine is configured to shut down automatically (based on Brisbane,
 | Component | Details | Purpose |
 | -- | -- | -- |
 | Network Security Group | nsg-llm-workload-dev-001 | Security group for gateway subnet. |
-| Managed Identity | id-vmvllm001-dev | Identity for the VPN gateway server. |
+| Managed Identity | id-vmvllm001-dev | Identity for the VPN gateway server, with permission to KeyVault. |
 | Disk | diskmodels001 | Data disk for model download; can detach and persist if server recreated. |
 
 | VPN Gateway | vmstrongswan001 | Road warrior VPN gateway, to demonstrate use of a second layer of security. |
@@ -108,8 +109,16 @@ The virtual machine is configured to shut down automatically (based on Brisbane,
 The following subnet ranges are allocated:
 
 | Vnet | IPv6 range | IPv4 range | Purpose |
+| -- | -- | -- | -- |
 | snet-llm-workload-dev-australiaeast-001 | `--:0200::/64` | `--.32.0/24` | Workload subnet. |
 
+DNS names:
+
+| DNS name |
+| -- |
+| vllm-<OrgId>-dev.australiaeast.cloudapp.azure.com |
+| vllm-<OrgId>-dev-ipv4.australiaeast.cloudapp.azure.com |
+ 
 
 ### Open source large language model (LLM)
 

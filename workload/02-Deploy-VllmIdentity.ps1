@@ -6,7 +6,7 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * User-assigned managed identity `id-vllm-dev-001`
+    * User-assigned managed identity `id-vmvllm001-dev`
 
   Assigns identity permissions to read keyvault
 
@@ -110,12 +110,12 @@ if ($existingIdentity) {
 
 # Assign Key Vault permissions
 
-Write-Verbose "Granting 'get, list' secret permissions on '$kvName' to identity '$identityName' ($principalId)"
+Write-Verbose "Granting 'get, list' secret permissions on '$kvName' to identity '$identityName' ($identity.principalId)"
 az keyvault set-policy `
     --name $kvName `
     --resource-group $coreRgName `
-    --object-id $principalId `
-    --secret-permissions get list `
+    --object-id $identity.principalId `
+    --secret-permissions list get `
     --output none
 if ($LASTEXITCODE -ne 0) { throw "az keyvault set-policy failed for identity '$identityName' on '$kvName'" }
 

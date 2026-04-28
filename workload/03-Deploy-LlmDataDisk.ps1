@@ -6,7 +6,7 @@
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
   
-    * Standalone Managed Disk `disk-vllm-models-dev-001` in the workload resource group.
+    * Standalone Managed Disk `diskmodels001` in the workload resource group.
 
   The disk is populated with the model after initial virtual machine creation.
 
