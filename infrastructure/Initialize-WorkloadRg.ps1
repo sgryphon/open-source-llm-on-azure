@@ -1,21 +1,20 @@
 #!/usr/bin/env pwsh
 
 <# .SYNOPSIS
-  Deploy core resource group and hub network into Azure.
+  Deploy workload resource group and network into Azure.
 
 .DESCRIPTION
   Creates, idempotently via Azure CLI:
 
-    * Resource group `rg-llm-core-001`
-    * Virtual network `vnet-llm-hub-australiaeast-001`, dual-stack (IPv6 ULA + IPv4)
+    * Resource group `rg-llm-workload-dev-001`
+    * Virtual network `vnet-llm-workload-dev-australiaeast-001`, dual-stack
+    * Two-way peering `peer-llm-workload-dev-to-hub` and `peer-llm-hub-to-workload-dev`
 
   Addresses are derived deterministically with an IPv6 ULA Global ID 10-hex-character
   SHA256 prefix of the subscription ID. IPv4 has a 10.x network using the first byte.
-  
-  This gives subscriptions unique but consistent ranges.
 
 .NOTES
-  This creates a core network in your Azure subscription.
+  This creates a worload network in your Azure subscription.
 
   The network is dual stack with an IPv6 /56 Unique Local Address allocation,
   using a default Global ID based on a consistent unique hash of the
@@ -46,12 +45,14 @@
    az login
    az account set --subscription <subscription id>
    $VerbosePreference = 'Continue'
-   ./01-Initialize-CoreRg.ps1
+   ./infrastructure/Initialize-WorkloadRg.ps1
 #>
 [CmdletBinding()]
 param (
     ## Purpose prefix
     [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
+    ## Workload prefix
+    [string]$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
     ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
     [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
     ## The Azure region where the resource is deployed.
@@ -60,8 +61,8 @@ param (
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
     ## Ten character IPv6 Unique Local Address GlobalID to use (default hash of subscription ID)
     [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
-    ## Two character IPv6 Unique Local Address vnet ID to use for core subnet (default 01)
-    [string]$VnetId = $ENV:DEPLOY_HUB_VNET_ID ?? ("01")
+    ## Two character IPv6 Unique Local Address vnet ID to use for workload subnet (default 02)
+    [string]$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02")
 )
 
 <#
@@ -70,25 +71,29 @@ To run interactively, start with:
 $VerbosePreference = 'Continue'
 
 $Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
+$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
 $Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev'
 $Region = $ENV:DEPLOY_REGION ?? 'australiaeast'
 $Instance = $ENV:DEPLOY_INSTANCE ?? '001'
 $UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10)
-$VnetId = $ENV:DEPLOY_HUB_VNET_ID ?? ("01")
+$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02")
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
 
 $SubscriptionId = $(az account show --query id --output tsv)
-Write-Verbose "Initialising $Purpose resource group in subscription '$SubscriptionId'"
+Write-Verbose "Initialising $Purpose $Workload $Environment resource group in subscription '$SubscriptionId'"
 
 # Following standard naming conventions from Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-naming
 # With an additional organisation or subscription identifier (after app name) in global names to make them unique 
 
-$rgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
-$vnetName = "vnet-$Purpose-hub-$Region-$Instance".ToLowerInvariant()
+$rgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
+$vnetName = "vnet-$Purpose-$Workload-$Environment-$Region-$Instance".ToLowerInvariant()
+
+$coreRgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
+$hubVnetName = "vnet-$Purpose-hub-$Region-$Instance".ToLowerInvariant()
 
 # Landing zone templates have a VNet RG, with one network, and four subnets:
 # GatewaySubnet (.0/26), AzureFirewallSubnet (.64/26),
@@ -112,6 +117,7 @@ $vnetIPv4 = "10.$prefixByte.$decVnet.0/20"
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 $TagDictionary = [ordered]@{
+    WorkloadName       = $Workload
     DataClassification = 'Non-business'
     Criticality        = 'Low'
     BusinessUnit       = $Purpose
@@ -124,7 +130,7 @@ $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary
 # Create
 
 Write-Verbose "Creating resource group $rgName"
-az group create --name $rgName --location $Region --tags $tags
+az group create --name $rgName -l $Region --tags $tags
 if ($LASTEXITCODE -ne 0) { throw "az group create failed for '$rgName'" }
 
 Write-Verbose "Creating virtual network $vnetName ($vnetIpPrefix, $vnetIPv4)"
@@ -133,5 +139,52 @@ az network vnet create --name $vnetName `
                        --address-prefixes $vnetIpPrefix $vnetIPv4 `
                        --location $Region `
                        --tags $tags
+
+# Peering
+
+function NewPeeringIfMissing (
+        [string]$peerName,
+        [string]$peerRgName, 
+        [string]$peerVnetName, 
+        [string]$remoteRgName,
+        [string]$remoteVnetName,
+        [boolean]$allowForwardedTraffic
+    )
+{
+    Write-Verbose "Checking peering $Name on $VNetName"
+    $existing = az network vnet peering show `
+        --name $peerName `
+        --resource-group $peerRgName `
+        --vnet-name $peerVnetName `
+        --output tsv 2>$null
+    if ($existing) {
+        Write-Verbose "Peering $Name already exists; skipping."
+        return
+    }
+
+    $remoteVnetResourceId = az network vnet show --name $remoteVnetName --resource-group $remoteRgName --query id --output tsv
+
+    Write-Verbose "Creating peering $peerName on $peerVnetName to $remoteVnetName (forwarded-traffic=$($AllowForwardedTraffic.IsPresent))"
+    $args = @(
+        'network','vnet','peering','create',
+        '--name', $peerName,
+        '--resource-group', $peerRgName,
+        '--vnet-name', $peerVnetName,
+        '--remote-vnet', $remoteVnetResourceId,
+        '--allow-vnet-access', 'true',
+        '--output', 'none'
+    )
+    if ($allowForwardedTraffic) {
+        $args += @('--allow-forwarded-traffic','true')
+    }
+    az @args
+}
+
+# Peering Workload <-> Hub (forwarded-traffic true on both halves)
+$peerVnetToHubName = "peer-$Purpose-$Workload-$Environment-to-hub".ToLowerInvariant()
+$peerHubToVnetName = "peer-$Purpose-hub-to-$Workload-$Environment".ToLowerInvariant()
+
+NewPeeringIfMissing $peerVnetToHubName $rgName $vnetName $coreRgName $hubVnetName $true
+NewPeeringIfMissing $peerHubToVnetName $coreRgName $hubVnetName $rgName $vnetName $true
 
 Write-Verbose "Initialise $rgName complete"

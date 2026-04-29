@@ -20,7 +20,7 @@ $VerbosePreference = 'Continue'
 
 1. You will need an Azure subscription. Scripts are written assuming you have full access.
 2. Log in using the Azure CLI (`az login`)
-3. Run the `infrastructure` scripts, in order, to create resource groups and network routing. If you have a more locked down environment, you may need to get central IT to provision out what you need.
+3. Run the `infrastructure` scripts, to create resource groups and network routing. If you have a more locked down environment, you may need to get central IT to provision out what you need.
 4. Run the `shared` scripts, in order, to create shared landing zone components. If your enviornment already has shared components some of these may not be needed.
   - You need to set the VPN user password, e.g. `$env:DEPLOY_VPN_USER_PASSWORD = 'P@ssword01'`
 5. Run the `workload` scripts to deploy the vLLM server.
