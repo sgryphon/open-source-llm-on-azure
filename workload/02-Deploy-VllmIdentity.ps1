@@ -64,11 +64,11 @@ $SubscriptionId = $(az account show --query id --output tsv)
 Write-Verbose "Deploying LLM/vLLM managed identity for '$Environment' in subscription '$SubscriptionId'"
 
 $appName   = 'vllm'
-$vmName    = "vm$appName$Instance".ToLowerInvariant()
+$vmName    = "vm$appName$Environment$Instance".ToLowerInvariant()
 
 # Workload RG hosts the UAMI; shared core RG hosts the Key Vault.
 $workloadRgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
-$identityName = "id-$vmName-$Environment".ToLowerInvariant()
+$identityName = "id-$vmName".ToLowerInvariant()
 
 $coreRgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
@@ -80,11 +80,11 @@ if (-not $workloadRg) {
 
 # CAF tags (matches the design's tag table for this workload).
 $TagDictionary = [ordered]@{
-    WorkloadName       = 'llm'
-    ApplicationName    = 'llm-vllm'
+    WorkloadName       = $Workload
+    ApplicationName    = $appName
     DataClassification = 'Non-business'
     Criticality        = 'Low'
-    BusinessUnit       = 'IT'
+    BusinessUnit       = $Purpose
     Env                = $Environment
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }

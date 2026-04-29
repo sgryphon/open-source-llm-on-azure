@@ -118,11 +118,10 @@ Write-Verbose "Subnet prefixes: IPv6=$subnetIPv6, IPv4=$subnetIPv4"
 
 # CAF tags (matches the design's tag table for this workload).
 $TagDictionary = [ordered]@{
-    WorkloadName       = 'llm'
-    ApplicationName    = 'llm-vllm'
+    WorkloadName       = $Workload
     DataClassification = 'Non-business'
     Criticality        = 'Low'
-    BusinessUnit       = 'IT'
+    BusinessUnit       = $Purpose
     Env                = $Environment
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }
@@ -177,6 +176,19 @@ function Add-NsgRuleIfAbsent {
 }
 
 Add-NsgRuleIfAbsent -Name 'AllowSshInbound'   -Priority 1000 -DestPort '22'
+
+Write-Verbose "Adding Network security group rule 'AllowICMP' for ICMP to $gatewayNsgName"
+az network nsg rule create --name AllowICMPv4 `
+                           --nsg-name $gatewayNsgName `
+                           --priority 1001 `
+                           --resource-group $rgName `
+                           --access Allow `
+                           --source-address-prefixes "*" `
+                           --direction Inbound `
+                           --destination-port-ranges "*" `
+                           --protocol Icmp
+# ICMPv6 is not supported in the CLI yet, so needs to be created manually
+
 Add-NsgRuleIfAbsent -Name 'AllowHttpInbound'  -Priority 1010 -DestPort '80'
 Add-NsgRuleIfAbsent -Name 'AllowHttpsInbound' -Priority 1020 -DestPort '443'
 

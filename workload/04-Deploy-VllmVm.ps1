@@ -52,7 +52,7 @@ param (
     ## Instance number uniquifier.
     [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
     ## VM size. Default is the cheapest T4 SKU.
-    [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_NC4as_T4_v3',
+    [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_NV6ads_A10_v5',
     ## Linux admin account name (authentication via SSH key).
     [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser',
     ## Auto-shutdown time in UTC (HHMM). Empty string disables.
@@ -97,8 +97,8 @@ $AdminUsername = 'azureuser'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if ([string]::IsNullOrWhiteSpace($VpnUserPassword)) {
-    throw 'You must supply a value for -VpnUserPassword or set environment variable DEPLOY_VPN_USER_PASSWORD.'
+if ([string]::IsNullOrWhiteSpace($VllmApiKey)) {
+    throw 'You must supply a value for -VllmApiKey or set environment variable DEPLOY_VLLM_API_KEY.'
 }
 
 $SubscriptionId = $(az account show --query id --output tsv)
@@ -107,39 +107,39 @@ Write-Verbose "Deploying vLLM $Instance for environment '$Environment' in subscr
 $appName = 'vllm'
 $rgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
 $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
+$location = $rg.location
 
-$vnetName = "vnet-$Purpose-$Workload-$Environment-$locationLower-$Instance".ToLowerInvariant()
-$subnetName = "snet-$Purpose-vllm-$Environment-$locationLower-$Instance".ToLowerInvariant()
-#$nsgName = "nsg-$Purpose-vllm-$Environment-$Instance".ToLowerInvariant()
+$vnetName = "vnet-$Purpose-$Workload-$Environment-$location-$Instance".ToLowerInvariant()
+$subnetName = "snet-$Purpose-vllm-$Environment-$location-$Instance".ToLowerInvariant()
 
 $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 $apiKeySecretName = 'vllm-api-key'
 
-$vmName = "vm$Purpose$appName$Instance".ToLowerInvariant()
+$diskAppName = "model"
+$diskName = "disk$diskAppName$Environment$Instance".ToLowerInvariant()
+
+$vmName    = "vm$appName$Environment$Instance".ToLowerInvariant()
 $vmOsDisk = "osdisk$vmName".ToLowerInvariant()
-$nicName = "nic-01-$vmName-$Environment-$Instance".ToLowerInvariant()
-$ipcV6Name = "ipc-01-$vmName-$Environment-$Instance".ToLowerInvariant()
+$nicName = "nic-$vmName-01".ToLowerInvariant()
+$ipcV6Name = "ipc-$vmName-01".ToLowerInvariant()
 
-$pipV6Name  = "pip-$Purpose-vllm-$Environment-$locationLower-$Instance".ToLowerInvariant()
-$pipV4Name  = "pipv4-$Purpose-vllm-$Environment-$locationLower-$Instance".ToLowerInvariant()
+$pipV6Name  = "pip-$vmName-$location-01".ToLowerInvariant()
+$pipV4Name  = "pipv4-$vmName-$location-01".ToLowerInvariant()
 
-$pipV6DnsName = "$appName-$OrgId-$Environment".ToLowerInvariant()
-$pipV4DnsName = "$appName-$OrgId-$Environment-ipv4".ToLowerInvariant()
+$pipV6DnsName = "llm-$OrgId-$Environment-$Instance".ToLowerInvariant()
+$pipV4DnsName = "llm-$OrgId-$Environment-$Instance-ipv4".ToLowerInvariant()
 
-$identityName = "id-$vmName-$Environment".ToLowerInvariant()
-
-$diskAppName = "models"
-$diskName = "disk$diskAppName$Instance".ToLowerInvariant()
+$identityName = "id-$vmName".ToLowerInvariant()
 
 # Following standard tagging conventions from  Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 $TagDictionary = [ordered]@{
-    WorkloadName       = 'llm'
-    ApplicationName    = 'llm-vllm'
+    WorkloadName       = $Workload
+    ApplicationName    = $appName
     DataClassification = 'Non-business'
     Criticality        = 'Low'
-    BusinessUnit       = 'IT'
+    BusinessUnit       = $Purpose
     Env                = $Environment
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }
@@ -160,7 +160,7 @@ if (-not $pipV6) {
     --name $pipV6Name  `
     --dns-name $pipV6DnsName `
     --resource-group $rgName `
-    --location $rg.location `
+    --location $location `
     --sku Standard  `
     --allocation-method static  `
     --version IPv6 `
@@ -175,7 +175,7 @@ if ($AddPublicIpv4) {
         --name $pipV4Name  `
         --dns-name $pipV4DnsName `
         --resource-group $rgName `
-        --location $rg.location  `
+        --location $location  `
         --sku Standard  `
         --allocation-method static  `
         --version IPv4 `
@@ -187,25 +187,23 @@ if ($AddPublicIpv4) {
 
 $nic = az network nic show --name $nicName -g $rgName 2>$null | ConvertFrom-Json
 if (-not $nic) {
-    Write-Verbose "Creating Network interface controller $nicName (required IPv4 $vmIPv4)"
+    Write-Verbose "Creating Network interface controller $nicName (required IPv4)"
     az network nic create `
     --name $nicName `
     --resource-group $rgName `
-    --subnet $dmzSnet.Id `
-    --private-ip-address $vmIPv4 `
+    --subnet $snet.Id `
     --tags $tags
 
-    Write-Verbose "Adding NIC IP Config $ipcV6Name ($vmIpAddress, $pipName) to $nicName"
+    Write-Verbose "Adding NIC IP Config $ipcV6Name ($pipV6Name) to $nicName"
     az network nic ip-config create `
     --name $ipcV6Name `
     --nic-name $nicName  `
     --resource-group $rgName `
-    --subnet $dmzSnet.Id `
-    --private-ip-address $vmIpAddress `
+    --subnet $snet.Id `
     --private-ip-address-version IPv6 `
-    --public-ip-address $pipName
+    --public-ip-address $pipV6Name
 
-    $hostNames = $(az network public-ip show --name $pipName --resource-group $rgName --query dnsSettings.fqdn --output tsv)
+    $hostNames = $(az network public-ip show --name $pipV6Name --resource-group $rgName --query dnsSettings.fqdn --output tsv)
 
     if ($AddPublicIpv4) {
         # the auto-created config name is ipconfig1
@@ -217,6 +215,14 @@ if (-not $nic) {
 
         $hostNames = "$hostNames, $(az network public-ip show --name $pipv4Name --resource-group $rgName --query dnsSettings.fqdn --output tsv)"
     }
+}
+
+# Get host names from public IPs
+
+$hostNames = $(az network public-ip show --name $pipV6Name --resource-group $rgName --query dnsSettings.fqdn --output tsv)
+$certEmail = "postmaster@$hostNames" # Using the main host name
+if ($AddPublicIpv4) {
+    $hostNames = "$hostNames, $(az network public-ip show --name $pipv4Name --resource-group $rgName --query dnsSettings.fqdn --output tsv)"
 }
 
 # Store secret
@@ -234,19 +240,37 @@ if (-not $existingSecret) {
 
 # Check Quota: standardNCASv3Family covers Standard_NC4as_T4_v3 / NC8as_T4_v3 / NC16as_T4_v3 / NC64as_T4_v3.
 
-Write-Verbose "Checking GPU quota for 'standardNCASv3Family' in '$location'..."
-$quota = az vm list-usage --location $location --query "[?name.value=='standardNCASv3Family'] | [0]" --output json 2>$null | ConvertFrom-Json
+if ($VmSize -eq 'Standard_NV6ads_A10_v5') {
+    $vmFamily = 'StandardNVADSA10v5Family'
+    $cpuRequired = 6
+} else {
+    throw "Unknown VmSize $VmSize"
+}
+
+Write-Verbose "Checking GPU quota for '$vmFamily' in '$($location)'..."
+# $usage = az vm list-usage --location australiaeast --output json 2>$null | ConvertFrom-Json
+# $usage | Where-Object { $_.limit -gt $_.currentValue } | Where-Object { $_.localName -cmatch 'N(C|D|V)'}
+# az vm list-skus --location australiaeast --size Standard_NV
+# Apr 2026
+# Best StandardNCadsH100v5Family: Standard_NC40ads_H100_v5, Standard_NC80ads_H100_v5
+# Practical StandardNVADSA10v5Family: Standard_NV6ads_A10_v5, Standard_NV12ads_A10_v5, Standard_NV36ads_A10_v5=
+$quota = az vm list-usage --location $location --query "[?name.value=='$vmFamily'] | [0]" --output json 2>$null | ConvertFrom-Json
 if ($quota) {
     Write-Verbose "  current usage: $($quota.currentValue) / limit: $($quota.limit)"
-    if ([int]$quota.limit -lt 4) {
+    $cpuAvailable = $quota.limit - $quota.currentValue
+    if ([int]$cpuAvailable -lt $cpuRequired) {
         throw @"
-GPU quota 'standardNCASv3Family' in '$location' is $($quota.limit). Standard_NC4as_T4_v3 needs 4 vCPUs.
+GPU quota '$vmFamily' in '$location' is $($quota.limit). $VmSize needs $cpuRequired vCPUs.
 Request a quota increase: https://learn.microsoft.com/azure/quotas/per-vm-quota-requests
 "@
     }
 } else {
-    Write-Warning "Could not read 'standardNCASv3Family' quota for '$location' (the quota family may not be exposed in this region). Proceeding; VM create will fail clearly if quota is genuinely zero."
+        throw @"
+Could not read '$vmFamily' quota for '$location' (the quota family may not be exposed in this region). $VmSize needs $cpuRequired vCPUs.
+"@
 }
+
+# TODO: Check SKU available
 
 # Check data disk
 
@@ -302,7 +326,7 @@ $subs = [ordered]@{
     '#INIT_KEY_VAULT_NAME#'      = $kvName
     '#INIT_API_KEY_SECRET_NAME#' = $apiKeySecretName
     '#INIT_UAMI_CLIENT_ID#'      = $uamiClientId
-    '#INIT_CERT_EMAIL#'          = $AcmeEmail
+    '#INIT_CERT_EMAIL#'          = $certEmail
     '#INIT_VLLM_VERSION#'        = $VllmVersion
     '#INIT_SERVED_MODEL_NAME#'   = $ServedModelName
     '#INIT_MODEL_DIR_NAME#'      = $ModelDirName
@@ -427,6 +451,7 @@ if (-not ($ciStdout -and ($ciStdout -match 'CLOUD_INIT_DONE'))) {
         --output table 2>&1 | Write-Host
     throw "cloud-init did not reach 'done' on '$vmName'."
 }
+# To check: ssh llm-0x419d-dev-001.australiaeast.cloudapp.azure.com
 Write-Verbose "cloud-init reported 'done'."
 
 # ---------------------------------------------------------------------------

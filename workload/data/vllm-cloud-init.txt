@@ -101,7 +101,7 @@ write_files:
 
       # 1. Find the data disk and prepare /opt/models.
       #
-      # Azure attaches data disks at LUN 0 → /dev/disk/azure/scsi1/lun0
+      # Azure attaches data disks at LUN 0 /dev/disk/azure/scsi1/lun0
       # (the symlink is provided by waagent's udev rules). Wait up to ~60s
       # for the symlink to appear -- it can lag a fresh `az vm create`
       # slightly.

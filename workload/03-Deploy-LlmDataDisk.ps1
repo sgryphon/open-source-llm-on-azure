@@ -78,19 +78,19 @@ if (-not $rg) {
     throw "Workload resource group '$rgName' not found."
 }
 
-$appName = "models"
-$diskName = "disk$appName$Instance".ToLowerInvariant()
+$appName = "model"
+$diskName = "disk$appName$Environment$Instance".ToLowerInvariant()
 Write-Verbose "Disk name : $diskName"
 Write-Verbose "Size      : ${SizeGiB} GiB"
 Write-Verbose "SKU       : $Sku"
 
 # CAF tags. Only applied on initial create — see header.
 $TagDictionary = [ordered]@{
-    WorkloadName       = 'llm'
-    ApplicationName    = 'llm-vllm'
+    WorkloadName       = $Workload
+    ApplicationName    = $appName
     DataClassification = 'Non-business'
     Criticality        = 'Low'
-    BusinessUnit       = 'IT'
+    BusinessUnit       = $Purpose
     Env                = $Environment
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }
