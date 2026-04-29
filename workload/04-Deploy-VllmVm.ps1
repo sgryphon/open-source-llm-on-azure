@@ -203,8 +203,6 @@ if (-not $nic) {
     --private-ip-address-version IPv6 `
     --public-ip-address $pipV6Name
 
-    $hostNames = $(az network public-ip show --name $pipV6Name --resource-group $rgName --query dnsSettings.fqdn --output tsv)
-
     if ($AddPublicIpv4) {
         # the auto-created config name is ipconfig1
         az network nic ip-config update `
@@ -212,8 +210,6 @@ if (-not $nic) {
             --nic-name $nicName `
             -g $rgName `
             --public-ip-address $pipV4Name
-
-        $hostNames = "$hostNames, $(az network public-ip show --name $pipv4Name --resource-group $rgName --query dnsSettings.fqdn --output tsv)"
     }
 }
 

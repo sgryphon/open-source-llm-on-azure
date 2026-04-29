@@ -142,16 +142,12 @@ write_files:
       mkdir -p /etc/swanctl/x509ca /etc/swanctl/x509 /etc/swanctl/private
 
       # 1. Log in with the VM's user-assigned managed identity and fetch cert
-      # material. Key Vault access was granted to this identity by
-      # `03-Deploy-VpnIdentity.ps1` before the VM was created, so no
-      # permission-propagation race is expected. Retry for up to ~120s anyway
+      # material. 
+      # Retry for up to ~120s anyway
       # to absorb guest-OS network / IMDS readiness on first boot.
       deadline=$((SECONDS + 120))
       # Note: --allow-no-subscriptions is required because the UAMI is
-      # intentionally not granted any role on any subscription (its only
-      # permission is a Key Vault access-policy entry for secret get/list,
-      # which is a data-plane grant not a role assignment). Without this
-      # flag, `az login --identity` fails enumerating subscriptions.
+      # intentionally not granted any role on any subscription.
       until az login --identity --client-id "$UAMI_CLIENT_ID" --allow-no-subscriptions --output none 2>/dev/null; do
         if [ $SECONDS -ge $deadline ]; then
           echo "ERROR: az login --identity did not succeed within 120s" >&2

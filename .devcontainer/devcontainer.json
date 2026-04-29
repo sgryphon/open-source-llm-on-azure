@@ -23,7 +23,7 @@
 		},
         "ghcr.io/devcontainers/features/node:1": {},
         "ghcr.io/devcontainers-contrib/features/apt-packages:1": {
-            "packages": "openssl,strongswan-pki"
+            "packages": "openssl,strongswan-pki,iputils-ping,traceroute,iputils-tracepath"
         }
 	},
 
@@ -50,11 +50,13 @@
 				"jebbs.plantuml"
 			]
 		}
-	}
+	},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
+
+	"runArgs": ["--cap-add=NET_RAW"]
 }
