@@ -122,18 +122,17 @@ $rgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
 $location = $rg.location
 
-$appName = 'strongswan'
-
-$vmName = "vm$appName$Instance".ToLowerInvariant()
+$appName = 'strong'
 
 $gatewayNsgName = "nsg-$Purpose-gateway-$Environment-001".ToLowerInvariant()
-$identityName = "id-$vmName-$Environment".ToLowerInvariant()
-$pipV6Name = "pip-$vmName-$Environment-$location-$Instance".ToLowerInvariant()
-$pipV4Name = "pipv4-$vmName-$Environment-$location-$Instance".ToLowerInvariant()
-$nicName = "nic-01-$vmName-$Environment-$Instance".ToLowerInvariant()
-$vmOsDisk = "osdisk$vmName".ToLowerInvariant()
-
 $gatewaySubnetName = "snet-$Purpose-gateway-$Environment-$location-001".ToLowerInvariant()
+
+$vmName = "vm$appName$Environment$Instance".ToLowerInvariant()
+$identityName = "id-$vmName".ToLowerInvariant()
+$pipV6Name = "pip-$vmName-$location-01".ToLowerInvariant()
+$pipV4Name = "pipv4-$vmName-$location-01".ToLowerInvariant()
+$nicName = "nic-$vmName-01".ToLowerInvariant()
+$vmOsDisk = "osdisk$vmName".ToLowerInvariant()
 
 Write-Verbose "Network Security Group: $gatewayNsgName"
 Write-Verbose "Managed Identity: $identityName"
@@ -201,7 +200,7 @@ $poolBaseV4 = [IPAddress]"10.$prefixByte.$($poolDecVnet + $poolDecSubnet).128"
 $vipPoolRangeV4 = "$poolBaseV4/25"
 
 Write-Verbose "VPN subnets: IPv6=$poolSubnetV6, IPv4=$poolSubnetV4"
-Write-Verbose "VPN pools  : IPv6=$vipPoolRangeV6, IPv4=$vipPoolRangeV4"
+Write-Verbose "VPN pools : IPv6=$vipPoolRangeV6, IPv4=$vipPoolRangeV4"
 
 # Tag dictionary matching the gateway-subnet script's style.
 $TagDictionary = [ordered]@{
