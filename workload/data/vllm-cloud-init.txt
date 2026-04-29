@@ -91,8 +91,7 @@ write_files:
       #!/usr/bin/env bash
       set -euo pipefail
 
-      KV_NAME='#INIT_KEY_VAULT_NAME#'
-      API_KEY_SECRET='#INIT_API_KEY_SECRET_NAME#'
+      VLLM_API_KEY='#INIT_API_KEY#'
       UAMI_CLIENT_ID='#INIT_UAMI_CLIENT_ID#'
       VLLM_VERSION='#INIT_VLLM_VERSION#'
       MODEL_MOUNT='#INIT_MODEL_MOUNT_POINT#'
@@ -161,13 +160,10 @@ write_files:
       # 4. Fetch the API key and write /etc/vllm/vllm.env (mode 0600).
       mkdir -p /etc/vllm /etc/vllm/certs
       chown vllm:vllm /etc/vllm /etc/vllm/certs
-      VLLM_API_KEY=$(az keyvault secret show \
-          --vault-name "$KV_NAME" --name "$API_KEY_SECRET" \
-          --query value -o tsv)
+
       install -m 0600 -o vllm -g vllm /dev/null /etc/vllm/vllm.env
       printf 'VLLM_API_KEY=%s\nHF_HOME=%s/.cache\n' "$VLLM_API_KEY" "$MODEL_MOUNT" \
           > /etc/vllm/vllm.env
-      unset VLLM_API_KEY
 
       # 5. Create the venv and install vLLM (pinned). The pin matters --
       # vLLM's CLI flags (notably --tool-call-parser and quantisation

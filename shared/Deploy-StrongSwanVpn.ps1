@@ -559,21 +559,21 @@ else {
 $existingCaCert = az keyvault secret show --vault-name $kvName --name $caCertSecretName 2>$null | ConvertFrom-Json
 if (-not $existingCaCert) {
   Write-Verbose "Uploading Key Vault CA Cert secret"
-  az keyvault secret set --vaultName $kvName --name $caCertSecretName --file $caPemPath --content-type 'application/x-pem-file'
+  az keyvault secret set --vault-name $kvName --name $caCertSecretName --file $caPemPath --content-type 'application/x-pem-file'
   if ($LASTEXITCODE -ne 0) { throw "az keyvault secret set failed" }
 }
 
 $existingServerCert = az keyvault secret show --vault-name $kvName --name $serverCertSecretName 2>$null | ConvertFrom-Json
 if (-not $existingServerCert) {
   Write-Verbose "Uploading Key Vault Server Cert secret"
-  az keyvault secret set --vaultName $kvName --name $serverCertSecretName --file $serverPemPath --content-type 'application/x-pem-file'
+  az keyvault secret set --vault-name $kvName --name $serverCertSecretName --file $serverPemPath --content-type 'application/x-pem-file'
   if ($LASTEXITCODE -ne 0) { throw "az keyvault secret set failed" }
 }
 
 $existingServerKey = az keyvault secret show --vault-name $kvName --name $serverKeySecretName 2>$null | ConvertFrom-Json
 if (-not $existingServerKey) {
   Write-Verbose "Uploading Key Vault Server Key secret"
-  az keyvault secret set --vaultName $kvName --name $serverKeySecretName --file $serverKeyPath --content-type 'application/x-pem-file'
+  az keyvault secret set --vault-name $kvName --name $serverKeySecretName --file $serverKeyPath --content-type 'application/x-pem-file'
   if ($LASTEXITCODE -ne 0) { throw "az keyvault secret set failed" }
 }
 
