@@ -12,10 +12,9 @@
     1. Short-circuits if `<mount>/<dir>/config.json` already exists.
        The data disk persists across VM rebuilds; if the model is
        already there, this script is a no-op.
-    2. Installs `huggingface-hub` into the existing vLLM venv.
-    3. Runs `huggingface-cli download <repo> --local-dir <mount>/<dir>
-       --local-dir-use-symlinks False` to materialise the model files
-       (tokenizer, config, AWQ-quantised weights, ~5.5 GiB).
+    2. Creates the vLLM venv if missing (cloud-init may not have run).
+    3. Downloads the model via `huggingface_hub.snapshot_download` into
+       `<mount>/<dir>` (real files, no symlinks).
     4. Chowns the mount tree to `vllm:vllm`.
     5. `systemctl start vllm`. The unit's `ConditionPathExists` is now
        satisfied so the start succeeds.
@@ -112,16 +111,16 @@ if [ ! -f "$VENV/bin/python" ]; then
     "$VENV/bin/pip" install --upgrade pip
 fi
 
-# Install hf hub in the existing vLLM venv. -q to keep run-command output small.
-"$VENV/bin/pip" install -q huggingface-hub
-
-# Download the model. --local-dir-use-symlinks False writes real files into
-# $TARGET (not symlinks into ~/.cache/huggingface) so a future VM rebuild
-# that re-attaches the disk sees the files directly.
-sudo -u vllm "$VENV/bin/huggingface-cli" download \
-    "$REPO_ID" \
-    --local-dir "$TARGET" \
-    --local-dir-use-symlinks False
+# Download the model via Python API (huggingface-cli is deprecated in
+# huggingface-hub >=1.0). Files are written directly into $TARGET (no
+# symlinks) so a future VM rebuild that re-attaches the disk sees them.
+sudo -u vllm "$VENV/bin/python" -c "
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id='$REPO_ID',
+    local_dir='$TARGET',
+)
+"
 
 chown -R vllm:vllm __MOUNT__
 

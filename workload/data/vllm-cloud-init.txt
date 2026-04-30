@@ -1,23 +1,11 @@
 #cloud-config
 # vLLM OpenAI-compatible inference server on a single Ubuntu 22.04 VM.
 #
-# The VM fetches its API key from Key Vault via its user-assigned managed
-# identity at first boot -- nothing private is substituted into this file
-# by the PowerShell script.
+# The API key is baked into the cloud-init template by the PowerShell script --
+# nothing private is fetched from Key Vault at runtime.
 
 # The model bytes are NOT downloaded by cloud-init: they are placed onto
 # the persistent data disk later.
-
-apt:
-  conf: |
-    Acquire::Retries "60";
-    DPkg::Lock::Timeout "60";
-  # Add Microsoft's apt repo for the Azure CLI
-  sources:
-    azure-cli.list:
-      source: "deb [arch=amd64 signed-by=$KEY_FILE] https://packages.microsoft.com/repos/azure-cli/ $RELEASE main"
-      keyid: EB3E94ADBE1229CF
-      keyserver: keyserver.ubuntu.com
 
 package_update: true
 package_upgrade: false
@@ -29,7 +17,6 @@ packages:
   - jq
   - curl
   - e2fsprogs
-  - azure-cli
 
 write_files:
   # Certbot deploy hook: copies renewed cert material into /etc/vllm/certs and restarts vllm.service.
@@ -50,8 +37,7 @@ write_files:
       fi
 
   # systemd unit for vLLM. ConditionPathExists keeps the unit inactive
-  # (silently, no error) until util/Download-LlmModelToDisk.ps1 places
-  # the model files.
+  # (silently, no error) until the model files are loaded.
   - path: /etc/systemd/system/vllm.service
     owner: root:root
     permissions: '0644'
@@ -66,13 +52,13 @@ write_files:
       User=vllm
       Group=vllm
       EnvironmentFile=/etc/vllm/vllm.env
-      ExecStart=/opt/vllm/.venv/bin/python -m vllm.entrypoints.openai.api_server \
+      ExecStart=/opt/vllm/.venv/bin/vllm serve \
+          #INIT_MODEL_MOUNT_POINT#/#INIT_MODEL_DIR_NAME# \
           --host :: \
           --port 443 \
           --ssl-certfile /etc/vllm/certs/server.pem \
           --ssl-keyfile  /etc/vllm/certs/server.key \
           --api-key      ${VLLM_API_KEY} \
-          --model        #INIT_MODEL_MOUNT_POINT#/#INIT_MODEL_DIR_NAME# \
           --served-model-name #INIT_SERVED_MODEL_NAME# \
           --tool-call-parser hermes \
           --enable-auto-tool-choice \
@@ -92,7 +78,6 @@ write_files:
       set -euo pipefail
 
       VLLM_API_KEY='#INIT_API_KEY#'
-      UAMI_CLIENT_ID='#INIT_UAMI_CLIENT_ID#'
       VLLM_VERSION='#INIT_VLLM_VERSION#'
       MODEL_MOUNT='#INIT_MODEL_MOUNT_POINT#'
       HOST_NAMES='#INIT_HOST_NAMES#'
@@ -143,7 +128,7 @@ write_files:
       fi
       chown vllm:vllm "$MODEL_MOUNT"
 
-      # 4. Fetch the API key and write /etc/vllm/vllm.env (mode 0600).
+      # 3. Write /etc/vllm/vllm.env.
       mkdir -p /etc/vllm /etc/vllm/certs
       chown vllm:vllm /etc/vllm /etc/vllm/certs
 
@@ -151,7 +136,7 @@ write_files:
       printf 'VLLM_API_KEY=%s\nHF_HOME=%s/.cache\n' "$VLLM_API_KEY" "$MODEL_MOUNT" \
           > /etc/vllm/vllm.env
 
-      # 5. Create the venv and install vLLM (pinned). The pin matters --
+      # 4. Create the venv and install vLLM (pinned). The pin matters --
       # vLLM's CLI flags (notably --tool-call-parser and quantisation
       # options) drift between minor versions.
       python3 -m venv /opt/vllm/.venv
@@ -159,13 +144,13 @@ write_files:
       /opt/vllm/.venv/bin/pip install "vllm==${VLLM_VERSION}"
       chown -R vllm:vllm /opt/vllm
 
-      # 6. setcap on the venv's python so vllm.service can bind :443
+      # 5. setcap on the venv's python so vllm.service can bind :443
       # without running as root. The capability is set on the venv-
       # specific binary so it does not grant the privilege system-wide.
       VENV_PY=$(readlink -f /opt/vllm/.venv/bin/python)
       setcap 'cap_net_bind_service=+ep' "$VENV_PY"
 
-      # 7. Issue the initial Let's Encrypt cert.
+      # 6. Issue the initial Let's Encrypt cert.
       # certbot standalone binds :80 transiently; vLLM never binds 80,
       # and the systemd unit is not started yet, so there is no port
       # conflict. ACME_STAGING_FLAG is empty for production, --test-cert
@@ -175,7 +160,7 @@ write_files:
           -d "$HOST_NAMES" \
           -n --agree-tos -m "$CERT_EMAIL"
 
-      # 8. Run the deploy hook explicitly so the initial cert lands in
+      # 7. Run the deploy hook explicitly so the initial cert lands in
       # /etc/vllm/certs without waiting for the first renewal. The hook
       # also calls `systemctl restart vllm`, which is a no-op while the
       # unit's ConditionPathExists is unsatisfied (the model is not
@@ -183,8 +168,8 @@ write_files:
       RENEWED_LINEAGE=/etc/letsencrypt/live/vllm-cert \
           /etc/letsencrypt/renewal-hooks/deploy/10-vllm-restart.sh
 
-      # 9. Enable the unit; do NOT start it. The operator's
-      # util/Download-LlmModelToDisk.ps1 will start it once the model
+      # 8. Enable the unit; do NOT start it. The operator's
+      # util/Import-LlmModel.ps1 will start it once the model
       # files are on disk.
       systemctl daemon-reload
       systemctl enable vllm

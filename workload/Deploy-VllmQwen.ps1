@@ -73,7 +73,7 @@ param (
   [ValidateSet('Standard_LRS', 'StandardSSD_LRS', 'Premium_LRS')]
   [string]$DiskSku = $ENV:DEPLOY_LLM_DISK_SKU ?? 'StandardSSD_LRS',
   ## Pinned vLLM version. Change deliberately; vLLM CLI flags drift between minors.
-  [string]$VllmVersion = $ENV:DEPLOY_VLLM_VERSION ?? '0.6.4',
+  [string]$VllmVersion = $ENV:DEPLOY_VLLM_VERSION ?? '0.20.0',
   ## Mount point for the data disk on the VM.
   [string]$ModelMountPoint = $ENV:DEPLOY_MODEL_MOUNT_POINT ?? '/opt/models',
   ## Subdirectory under the model mount where the model files live.
@@ -472,7 +472,6 @@ if (-not $vm) {
   $subs = [ordered]@{
     '#INIT_HOST_NAMES#'        = $fqdnJoinedList
     '#INIT_API_KEY#'           = $VllmApiKey
-    '#INIT_UAMI_CLIENT_ID#'    = $uamiClientId
     '#INIT_CERT_EMAIL#'        = $certEmail
     '#INIT_VLLM_VERSION#'      = $VllmVersion
     '#INIT_SERVED_MODEL_NAME#' = $ServedModelName
@@ -596,5 +595,5 @@ $vm | Format-List name, fqdns, publicIps, privateIps, location, hardwareProfile
 Write-Verbose "  Data disk      : $diskName (attached at LUN 0, persistent across rebuilds)"
 Write-Verbose "  vllm.service   : enabled, INACTIVE (model not yet loaded)"
 Write-Verbose ""
-Write-Verbose "NEXT STEP: run util/Download-LlmModelToDisk.ps1 to populate the data disk with"
+Write-Verbose "NEXT STEP: run util/Import-LlmModel.ps1 to populate the data disk with"
 Write-Verbose "the model files. After it completes, vllm.service will start automatically."
