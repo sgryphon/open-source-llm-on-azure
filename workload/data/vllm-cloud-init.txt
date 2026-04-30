@@ -143,20 +143,6 @@ write_files:
       fi
       chown vllm:vllm "$MODEL_MOUNT"
 
-      # 3. az login --identity, with retry to absorb first-boot IMDS lag.
-      # --allow-no-subscriptions: the UAMI has no role assignments by
-      # design (only a Key Vault access-policy entry for get/list secrets,
-      # which is a data-plane grant). Without this flag, `az login
-      # --identity` fails enumerating subscriptions.
-      deadline=$((SECONDS + 120))
-      until az login --identity --client-id "$UAMI_CLIENT_ID" --allow-no-subscriptions --output none 2>/dev/null; do
-        if [ $SECONDS -ge $deadline ]; then
-          echo "ERROR: az login --identity did not succeed within 120s" >&2
-          exit 1
-        fi
-        sleep 5
-      done
-
       # 4. Fetch the API key and write /etc/vllm/vllm.env (mode 0600).
       mkdir -p /etc/vllm /etc/vllm/certs
       chown vllm:vllm /etc/vllm /etc/vllm/certs

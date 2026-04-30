@@ -82,6 +82,7 @@ Write-Verbose "Will download '$ModelRepoId' into '$ModelMountPoint/$ModelDirName
 # Inline script. Token substitution via .Replace() (no PS string interp into
 # the heredoc, to keep the bash semantics readable).
 $inline = @'
+#!/bin/bash
 set -euo pipefail
 REPO_ID="__REPO__"
 TARGET="__MOUNT__/__DIR__"
@@ -102,6 +103,14 @@ fi
 
 mkdir -p "$TARGET"
 chown vllm:vllm "$TARGET"
+
+# Ensure the vLLM venv exists (cloud-init may not have created it, or VM
+# may have been rebuilt without re-running cloud-init).
+if [ ! -f "$VENV/bin/python" ]; then
+    echo "Creating vLLM venv at $VENV..."
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --upgrade pip
+fi
 
 # Install hf hub in the existing vLLM venv. -q to keep run-command output small.
 "$VENV/bin/pip" install -q huggingface-hub
