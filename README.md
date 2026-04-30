@@ -22,17 +22,19 @@ $VerbosePreference = 'Continue'
 2. Log in using the Azure CLI (`az login`)
 3. Run the `infrastructure` scripts, to create resource groups and network routing. If you have a more locked down environment, you may need to get central IT to provision out what you need.
 4. Run the `shared` scripts, in order, to create shared landing zone components. If your enviornment already has shared components some of these may not be needed.
-  - You need to set the VPN user password, e.g. `$env:DEPLOY_VPN_USER_PASSWORD = 'P@ssword01'`
+
+- You need to set the VPN user password, e.g. `$env:DEPLOY_VPN_USER_PASSWORD = 'P@ssword01'`
+
 5. Run the `workload` scripts to deploy the vLLM server.
-6. Run the `util/Import-LlmModel.ps` script to download a model to the server. 
+6. Run the `util/Import-LlmModel.ps` script to download a model to the server.
 
 ## Infrastructure: Resource groups and network routing
 
 The `infrastructure` scripts create the following resource groups and networks. In a controlled environment these would be provisioned by Central IT.
 
-| Resource Group | Purpose |
-| -- | -- |
-| rg-llm-core-001 | Contains shared services. |
+| Resource Group          | Purpose                                                         |
+| ----------------------- | --------------------------------------------------------------- |
+| rg-llm-core-001         | Contains shared services.                                       |
 | rg-llm-workload-dev-001 | For the LLM workload. May need to be provisioned by central IT. |
 
 The scripts also use an `fdxx:xxxx:xxxx::/48` ULA range and `10.xx.0.0/16` IPv4 range for networking. The 10-byte ULA global prefix is deterined by a hash of the subscription, so that it is deterministic but varies by subscription.
@@ -52,42 +54,44 @@ Two-way peering is configured between the workload vnet and the hub vnet. In a c
 
 A central IT function may allocate these resources, or they may be dedicated resources for the workload, although they are not part of the workload itself.
 
-| Component | Details | Purpose |
-| -- | -- | -- |
-| Azure Monitor | log-llm-shared-dev | Used for monitoring. |
-| App Insights | appi-llm-shared-dev | Used for application monitoring. |
-| KeyVault | kv-llm-shared-<orgId>-dev| Used for secure storage of secrets and certificates, rather than storing locally on machines. |
+| Component     | Details                   | Purpose                                                                                       |
+| ------------- | ------------------------- | --------------------------------------------------------------------------------------------- |
+| Azure Monitor | log-llm-shared-dev        | Used for monitoring.                                                                          |
+| App Insights  | appi-llm-shared-dev       | Used for application monitoring.                                                              |
+| KeyVault      | kv-llm-shared-<orgId>-dev | Used for secure storage of secrets and certificates, rather than storing locally on machines. |
 
 ### VPN Gateway (StrongSwan)
 
 Road warrior VPN gateway, to demonstrate use of a second layer of security.
 
 DNS host names:
-  * "vpn-<OrgId>-dev.australiaeast.cloudapp.azure.com"
-  * "vpn-<OrgId>-dev-ipv4.australiaeast.cloudapp.azure.com"
+
+- "vpn-<OrgId>-dev.australiaeast.cloudapp.azure.com"
+- "vpn-<OrgId>-dev-ipv4.australiaeast.cloudapp.azure.com"
 
 The following subnet ranges are allocated:
 
-| Vnet | IPv6 range | IPv4 range | Purpose |
-| -- | -- | -- | -- |
-| snet-llm-gateway-dev-australiaeast-001 | `--:0100::/64` | `--.16.0/24` | VPN gateway subnet. |
-| VPN Clients | `--:300::/64` | `--.48.0/24` | Subnet for VPN client pool. |
+| Vnet                                   | IPv6 range     | IPv4 range   | Purpose                     |
+| -------------------------------------- | -------------- | ------------ | --------------------------- |
+| snet-llm-gateway-dev-australiaeast-001 | `--:0100::/64` | `--.16.0/24` | VPN gateway subnet.         |
+| VPN Clients                            | `--:300::/64`  | `--.48.0/24` | Subnet for VPN client pool. |
 
 The following Azure resources are created (if they do not already exist).
 
-| Component | Details | Purpose |
-| -- | -- | -- |
-| Network Security Group | nsg-llm-gateway-dev-001 | Security group for gateway subnet. |
-| Managed Identity | id-vmstrongdev001 | Identity for the VPN gateway server. |
-| Public IP | pip-vmstrongdev001-australiaeast-01 | Public IPv6. |
-| Public IP | pipv4-vmstrongdev001-australiaeast-01 | Public IPv4. |
-| Network Interface | nic-vmstrongdev001-01 | Separate NIC, so that public IP can be retained if server is recreated. |
-| Virtual Machine | vmstrongdev001 | StrongSwan virtual machine. |
-| Disk | osdiskvmstrongdev001 | OS disk for the VM. |
+| Component              | Details                               | Purpose                                                                 |
+| ---------------------- | ------------------------------------- | ----------------------------------------------------------------------- |
+| Network Security Group | nsg-llm-gateway-dev-001               | Security group for gateway subnet.                                      |
+| Managed Identity       | id-vmstrongdev001                     | Identity for the VPN gateway server.                                    |
+| Public IP              | pip-vmstrongdev001-australiaeast-01   | Public IPv6.                                                            |
+| Public IP              | pipv4-vmstrongdev001-australiaeast-01 | Public IPv4.                                                            |
+| Network Interface      | nic-vmstrongdev001-01                 | Separate NIC, so that public IP can be retained if server is recreated. |
+| Virtual Machine        | vmstrongdev001                        | StrongSwan virtual machine.                                             |
+| Disk                   | osdiskvmstrongdev001                  | OS disk for the VM.                                                     |
 
 VPN address pools:
-  * IPv6 allocates addresses from the range `--:300::1000` to `--:300::1fff`.
-  * IPv4 allocates addresses from the range `--.48.128` to `--.48.255`.
+
+- IPv6 allocates addresses from the range `--:300::1000` to `--:300::1fff`.
+- IPv4 allocates addresses from the range `--.48.128` to `--.48.255`.
 
 Default machine size is 'Standard_D2s_v6'.
 
@@ -98,36 +102,77 @@ The virtual machine is configured to shut down automatically (based on Brisbane,
 ## Workload
 
 DNS host names:
-  * "llm-<OrgId>-dev-001.australiaeast.cloudapp.azure.com"
-  * "llm-<OrgId>-dev-001-ipv4.australiaeast.cloudapp.azure.com"
+
+- "llm-<OrgId>-dev-001.australiaeast.cloudapp.azure.com"
+- "llm-<OrgId>-dev-001-ipv4.australiaeast.cloudapp.azure.com"
 
 The following subnet ranges are allocated:
 
-| Vnet | IPv6 range | IPv4 range | Purpose |
-| -- | -- | -- | -- |
+| Vnet                                    | IPv6 range     | IPv4 range   | Purpose          |
+| --------------------------------------- | -------------- | ------------ | ---------------- |
 | snet-llm-workload-dev-australiaeast-001 | `--:0200::/64` | `--.32.0/24` | Workload subnet. |
 
 The following Azure resources are created (if they do not already exist).
 
-Already existing resources are reused, for example if you delete the virtual machine then 
+Already existing resources are reused, for example if you delete the virtual machine then
 the exist model disk and network interface (for IP addresses) will be retained.
 
-| Component | Details | Purpose |
-| -- | -- | -- |
-| Network Security Group | nsg-llm-workload-dev-001 | Security group for gateway subnet. |
-| Managed Identity | id-vmvllmdev001 | Identity for the VPN gateway server, with permission to shared Key Vault. |
-| Disk | diskmodeldev001 | Data disk for model download; can detach and persist if server recreated. |
-| Public IP | pip-vmvllmdev001-australiaeast-01 | Public IPv6; persists across server rebuild. |
-| Public IP | pipv4-vmvllmdev001-australiaeast-01 | Public IPv4; persists across server rebuild. |
-| Network Interface | nic-vmvllmdev001-01 | Separate NIC, so that IP addresses can be retained if server is recreated. |
-| Virtual Machine | vmvllmdev001 | vLLM virtual machine. |
-| Disk | osdiskvmvllmdev001 | OS disk for the VM. |
+| Component              | Details                             | Purpose                                                                    |
+| ---------------------- | ----------------------------------- | -------------------------------------------------------------------------- |
+| Network Security Group | nsg-llm-workload-dev-001            | Security group for gateway subnet.                                         |
+| Managed Identity       | id-vmvllmdev001                     | Identity for the VPN gateway server, with permission to shared Key Vault.  |
+| Disk                   | diskmodeldev001                     | Data disk for model download; can detach and persist if server recreated.  |
+| Public IP              | pip-vmvllmdev001-australiaeast-01   | Public IPv6; persists across server rebuild.                               |
+| Public IP              | pipv4-vmvllmdev001-australiaeast-01 | Public IPv4; persists across server rebuild.                               |
+| Network Interface      | nic-vmvllmdev001-01                 | Separate NIC, so that IP addresses can be retained if server is recreated. |
+| Virtual Machine        | vmvllmdev001                        | vLLM virtual machine.                                                      |
+| Disk                   | osdiskvmvllmdev001                  | OS disk for the VM.                                                        |
 
 Default machine size is 'Standard_NV6ads_A10_v5'. CPU quota and SKU availability are checked for the region.
 
 Required secrets and certificates are stored in the shared Key Vault.
 
 The virtual machine is configured to shut down automatically (based on Brisbane, Australia time), to save costs.
+
+## Troubleshooting
+
+### Cloud init debug
+
+Connect (SSH) to the server:
+
+```sh
+ssh azureuser@llm-0x419d-dev-001-ipv4.australiaeast.cloudapp.azure.com
+```
+
+Check the cloud init logs:
+
+```sh
+more /var/log/cloud-init-output.log
+```
+
+Also see: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cloud-init-troubleshooting
+
+### Configure SSH
+
+SSH is configured as part of server creation.
+
+However if you want to change to a different key you can manually configure, by generating:
+
+```pwsh
+ssh-keygen -t rsa -b 4096
+```
+
+Then uploading the public key to the server:
+
+```pwsh
+az vm user update `
+  --username azureuser `
+  --ssh-key-value ~/.ssh/id_rsa.pub `
+  --resource-group rg-llm-workload-dev-001 `
+  --name vmvllmdev001
+```
+
+## Notes
 
 ### Open source large language model (LLM)
 

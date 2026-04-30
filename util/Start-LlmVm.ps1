@@ -28,11 +28,12 @@ param (
     [string]$Instance    = $ENV:DEPLOY_INSTANCE    ?? '001'
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $rgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
-$vmName = "vm$Purpose" + 'vllm' + $Instance
-$vmName = $vmName.ToLowerInvariant()
+$appName = 'vllm'
+$vmName = "vm$appName$Environment$Instance".ToLowerInvariant()
 
 $vm = az vm show --name $vmName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $vm) {

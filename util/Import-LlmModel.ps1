@@ -43,7 +43,7 @@
 
   az login
   $VerbosePreference = 'Continue'
-  ./util/Download-LlmModelToDisk.ps1
+  ./util/Import-LlmModel.ps1
 #>
 [CmdletBinding()]
 param (
@@ -60,17 +60,19 @@ param (
     [string]$Instance    = $ENV:DEPLOY_INSTANCE    ?? '001'
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $rgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
-$vmName = ("vm$Purpose" + 'vllm' + $Instance).ToLowerInvariant()
+$appName = 'vllm'
+$vmName = "vm$appName$Environment$Instance".ToLowerInvariant()
 
-$vm = az vm show --name $vmName --resource-group $rgName 2>$null | ConvertFrom-Json
+$vm = (az vm show --name $vmName --resource-group $rgName 2>$null) | ConvertFrom-Json
 if (-not $vm) { throw "VM '$vmName' not found in '$rgName'." }
 
 # VM must be running for run-command to dispatch.
-$instance = az vm get-instance-view --name $vmName --resource-group $rgName 2>$null | ConvertFrom-Json
-$powerState = ($instance.instanceView.statuses | Where-Object { $_.code -like 'PowerState/*' } | Select-Object -First 1).code
+$vmInstance = (az vm get-instance-view --name $vmName --resource-group $rgName 2>$null) | ConvertFrom-Json
+$powerState = ($vmInstance.instanceView.statuses | Where-Object { $_.code -like 'PowerState/*' } | Select-Object -First 1).code
 if ($powerState -ne 'PowerState/running') {
     throw "VM '$vmName' is in state '$powerState'."
 }

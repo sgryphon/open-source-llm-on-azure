@@ -39,47 +39,47 @@
 #>
 [CmdletBinding()]
 param (
-    ## API Key to configure in vLLM (REQUIRED).
-    [string]$VllmApiKey = $ENV:DEPLOY_VLLM_API_KEY,
-    ## Purpose prefix.
-    [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
-    ## Workload prefix (matches `a-infrastructure/02-Initialize-WorkloadRg.ps1`).
-    [string]$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
-    ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
-    [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
-    ## Identifier for the organisation (or subscription) to make global names unique.
-    [string]$OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))",
-    ## Instance number uniquifier.
-    [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
-    ## VM size. Default is the cheapest T4 SKU.
-    [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_NV6ads_A10_v5',
-    ## Linux admin account name (authentication via SSH key).
-    [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser',
-    ## Auto-shutdown time in UTC (HHMM). Empty string disables.
-    [string]$ShutdownUtc = $ENV:DEPLOY_SHUTDOWN_UTC ?? '0900',
-    ## Email to send auto-shutdown notification to (optional).
-    [string]$ShutdownEmail = $ENV:DEPLOY_SHUTDOWN_EMAIL ?? '',
-    ## Add a public IPv4 in addition to the IPv6. 
-    [switch]$AddPublicIpv4 = ([string]::IsNullOrEmpty($ENV:DEPLOY_ADD_IPV4) -or $ENV:DEPLOY_ADD_IPV4 -eq 'true' -or $ENV:DEPLOY_ADD_IPV4 -eq '1'),
-    ## Ten-character IPv6 ULA Global ID 
-    [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
-    ## Two character IPv6 Unique Local Address vnet ID to use (default 02)
-    [string]$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02"),
-    ## Two character IPv6 Unique Local Address subnet ID to use (default 00)
-    [string]$SubnetId = $ENV:DEPLOY_WORKLOAD_SUBNET_ID ?? ("00"),
-    ## Disk size in GiB. 8 GiB is enough for one AWQ-INT4 7B model with headroom.
-    [int]$DiskSizeGiB = [int]($ENV:DEPLOY_LLM_DISK_GIB ?? 8),
-    ## Managed disk SKU.
-    [ValidateSet('Standard_LRS','StandardSSD_LRS','Premium_LRS')]
-    [string]$DiskSku = $ENV:DEPLOY_LLM_DISK_SKU ?? 'StandardSSD_LRS',
-    ## Pinned vLLM version. Change deliberately; vLLM CLI flags drift between minors.
-    [string]$VllmVersion = $ENV:DEPLOY_VLLM_VERSION ?? '0.6.4',
-    ## Mount point for the data disk on the VM.
-    [string]$ModelMountPoint = $ENV:DEPLOY_MODEL_MOUNT_POINT ?? '/opt/models',
-    ## Subdirectory under the model mount where the model files live.
-    [string]$ModelDirName = $ENV:DEPLOY_MODEL_DIR_NAME ?? 'qwen2.5-coder-7b-awq',
-    ## Served model name (the `id` returned by `/v1/models` and used in chat requests).
-    [string]$ServedModelName = $ENV:DEPLOY_SERVED_MODEL_NAME ?? 'qwen2.5-coder-7b'
+  ## API Key to configure in vLLM (REQUIRED).
+  [string]$VllmApiKey = $ENV:DEPLOY_VLLM_API_KEY,
+  ## Purpose prefix.
+  [string]$Purpose = $ENV:DEPLOY_PURPOSE ?? 'LLM',
+  ## Workload prefix (matches `a-infrastructure/02-Initialize-WorkloadRg.ps1`).
+  [string]$Workload = $ENV:DEPLOY_WORKLOAD ?? 'workload',
+  ## Deployment environment, e.g. Prod, Dev, QA, Stage, Test.
+  [string]$Environment = $ENV:DEPLOY_ENVIRONMENT ?? 'Dev',
+  ## Identifier for the organisation (or subscription) to make global names unique.
+  [string]$OrgId = $ENV:DEPLOY_ORGID ?? "0x$((az account show --query id --output tsv).Substring(0,4))",
+  ## Instance number uniquifier.
+  [string]$Instance = $ENV:DEPLOY_INSTANCE ?? '001',
+  ## VM size. Default is the cheapest T4 SKU.
+  [string]$VmSize = $ENV:DEPLOY_VM_SIZE ?? 'Standard_NV6ads_A10_v5',
+  ## Linux admin account name (authentication via SSH key).
+  [string]$AdminUsername = $ENV:DEPLOY_ADMIN_USERNAME ?? 'azureuser',
+  ## Auto-shutdown time in UTC (HHMM). Empty string disables.
+  [string]$ShutdownUtc = $ENV:DEPLOY_SHUTDOWN_UTC ?? '0900',
+  ## Email to send auto-shutdown notification to (optional).
+  [string]$ShutdownEmail = $ENV:DEPLOY_SHUTDOWN_EMAIL ?? '',
+  ## Add a public IPv4 in addition to the IPv6. 
+  [switch]$AddPublicIpv4 = ([string]::IsNullOrEmpty($ENV:DEPLOY_ADD_IPV4) -or $ENV:DEPLOY_ADD_IPV4 -eq 'true' -or $ENV:DEPLOY_ADD_IPV4 -eq '1'),
+  ## Ten-character IPv6 ULA Global ID 
+  [string]$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10),
+  ## Two character IPv6 Unique Local Address vnet ID to use (default 02)
+  [string]$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02"),
+  ## Two character IPv6 Unique Local Address subnet ID to use (default 00)
+  [string]$SubnetId = $ENV:DEPLOY_WORKLOAD_SUBNET_ID ?? ("00"),
+  ## Disk size in GiB. 8 GiB is enough for one AWQ-INT4 7B model with headroom.
+  [int]$DiskSizeGiB = [int]($ENV:DEPLOY_LLM_DISK_GIB ?? 8),
+  ## Managed disk SKU.
+  [ValidateSet('Standard_LRS', 'StandardSSD_LRS', 'Premium_LRS')]
+  [string]$DiskSku = $ENV:DEPLOY_LLM_DISK_SKU ?? 'StandardSSD_LRS',
+  ## Pinned vLLM version. Change deliberately; vLLM CLI flags drift between minors.
+  [string]$VllmVersion = $ENV:DEPLOY_VLLM_VERSION ?? '0.6.4',
+  ## Mount point for the data disk on the VM.
+  [string]$ModelMountPoint = $ENV:DEPLOY_MODEL_MOUNT_POINT ?? '/opt/models',
+  ## Subdirectory under the model mount where the model files live.
+  [string]$ModelDirName = $ENV:DEPLOY_MODEL_DIR_NAME ?? 'qwen2.5-coder-7b-awq',
+  ## Served model name (the `id` returned by `/v1/models` and used in chat requests).
+  [string]$ServedModelName = $ENV:DEPLOY_SERVED_MODEL_NAME ?? 'qwen2.5-coder-7b'
 )
 
 <#
@@ -87,29 +87,36 @@ To run interactively, start with:
 
 $VerbosePreference = 'Continue'
 
-$AcmeEmail = $ENV:DEPLOY_ACME_EMAIL
-$AcmeStaging = $false
-$VllmVersion = '0.6.4'
-$ServedModelName = 'qwen2.5-coder-7b'
-$ModelDirName = 'qwen2.5-coder-7b-awq'
-$ModelMountPoint = '/opt/models'
-$ShutdownUtc = '0900'
-$ShutdownEmail = ''
+$VllmApiKey = 'qwen_deadbeef0001'
 $Purpose = 'LLM'
 $Workload = 'workload'
 $Environment = 'Dev'
-$Region = 'australiaeast'
 $OrgId = "0x$((az account show --query id --output tsv).Substring(0,4))"
 $Instance = '001'
 $VmSize = 'Standard_NC4as_T4_v3'
 $AdminUsername = 'azureuser'
+$ShutdownUtc = '0900'
+$ShutdownEmail = ''
+$AddPublicIpv4 = $true
+
+$UlaGlobalId = $ENV:DEPLOY_GLOBAL_ID ?? (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes((az account show --query id --output tsv))))).Hash.Substring(0, 10)
+$VnetId = $ENV:DEPLOY_WORKLOAD_VNET_ID ?? ("02")
+$SubnetId = $ENV:DEPLOY_WORKLOAD_SUBNET_ID ?? ("00")
+
+$DiskSizeGiB = [int]($ENV:DEPLOY_LLM_DISK_GIB ?? 8)
+$DiskSku = $ENV:DEPLOY_LLM_DISK_SKU ?? 'StandardSSD_LRS'
+
+$VllmVersion = '0.6.4'
+$ModelMountPoint = '/opt/models'
+$ModelDirName = 'qwen2.5-coder-7b-awq'
+$ServedModelName = 'qwen2.5-coder-7b'
 #>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($VllmApiKey)) {
-    throw 'You must supply a value for -VllmApiKey or set environment variable DEPLOY_VLLM_API_KEY.'
+  throw 'You must supply a value for -VllmApiKey or set environment variable DEPLOY_VLLM_API_KEY.'
 }
 
 $SubscriptionId = $(az account show --query id --output tsv)
@@ -117,7 +124,7 @@ Write-Verbose "Deploying vLLM $Instance for environment '$Environment' in subscr
 # ---------------------------------------------------------
 # Names
 
-$rgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
+$rgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
 $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
 $location = $rg.location
 
@@ -149,7 +156,7 @@ Write-Verbose "Subnet: $subnetName"
 # Other values
 
 # Networking
-$vnetName = "vnet-$Purpose-hub-$location-$Instance".ToLowerInvariant()
+$vnetName = "vnet-$Purpose-$Workload-$Environment-$location-$Instance".ToLowerInvariant()
 
 # Global will default to unique value per subscription
 $prefixV6 = "fd$($UlaGlobalId.Substring(0, 2)):$($UlaGlobalId.Substring(2, 4)):$($UlaGlobalId.Substring(6, 4))"
@@ -167,6 +174,7 @@ $subnetAddressV4 = [IPAddress]"10.$prefixByte.$($decVnet + $decSubnet).0"
 $subnetV4 = "$subnetAddressV4/24"
 
 # KV, to assign identity permissions
+$coreRgName = "rg-$Purpose-core-$Instance".ToLowerInvariant()
 $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
 
 # Public DNS
@@ -177,49 +185,16 @@ $pipV4DnsName = "llm-$OrgId-$Environment-$Instance-ipv4".ToLowerInvariant()
 $ipcV4Name = 'ipconfig1'  # Azure auto-creates this on the NIC; we update it.
 $ipcV6Name = "ipc-v6-$vmName-$Environment-$Instance".ToLowerInvariant()
 
-
-
-
-
-
-
-# $appName = 'vllm'
-# $rgName = "rg-$Purpose-$Workload-$Environment-$Instance".ToLowerInvariant()
-# $rg = az group show --name $rgName 2>$null | ConvertFrom-Json
-# $location = $rg.location
-
-# $vnetName = "vnet-$Purpose-$Workload-$Environment-$location-$Instance".ToLowerInvariant()
-# $subnetName = "snet-$Purpose-vllm-$Environment-$location-$Instance".ToLowerInvariant()
-
-# $kvName = "kv-$Purpose-shared-$OrgId-$Environment".ToLowerInvariant()
-# $apiKeySecretName = 'vllm-api-key'
-
-# $diskAppName = "model"
-# $diskName = "disk$diskAppName$Environment$Instance".ToLowerInvariant()
-
-# $vmName    = "vm$appName$Environment$Instance".ToLowerInvariant()
-# $vmOsDisk = "osdisk$vmName".ToLowerInvariant()
-# $nicName = "nic-$vmName-01".ToLowerInvariant()
-# $ipcV6Name = "ipc-$vmName-01".ToLowerInvariant()
-
-# $pipV6Name  = "pip-$vmName-$location-01".ToLowerInvariant()
-# $pipV4Name  = "pipv4-$vmName-$location-01".ToLowerInvariant()
-
-# $pipV6DnsName = "llm-$OrgId-$Environment-$Instance".ToLowerInvariant()
-# $pipV4DnsName = "llm-$OrgId-$Environment-$Instance-ipv4".ToLowerInvariant()
-
-# $identityName = "id-$vmName".ToLowerInvariant()
-
 # Following standard tagging conventions from  Azure Cloud Adoption Framework
 # https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-tagging
 
 $TagDictionary = [ordered]@{
-    WorkloadName       = $Workload
-    ApplicationName    = $appName
-    DataClassification = 'Non-business'
-    Criticality        = 'Low'
-    BusinessUnit       = $Purpose
-    Env                = $Environment
+  WorkloadName       = $Workload
+  ApplicationName    = $appName
+  DataClassification = 'Non-business'
+  Criticality        = 'Low'
+  BusinessUnit       = $Purpose
+  Env                = $Environment
 }
 $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary[$key])" }
 
@@ -228,8 +203,9 @@ $tags = $TagDictionary.Keys | ForEach-Object { $key = $_; "$key=$($TagDictionary
 
 $nsg = az network nsg show --name $nsgName -g $rgName 2>$null | ConvertFrom-Json
 if (-not $nsg) {
-  Write-Verbose "Creating core network security group $nsgName"
+  Write-Verbose "Creating network security group $nsgName"
   az network nsg create --name $nsgName -g $rgName -l $location --tags $tags
+  if ($LASTEXITCODE -ne 0) { throw "create network security group failed." }
 
   Write-Verbose "Adding Network security group rule 'AllowSSH' for port 22 to $nsgName"
   az network nsg rule create --name AllowSSH `
@@ -269,7 +245,8 @@ if (-not $nsg) {
 
   # Check rules
   # az network nsg rule list --nsg-name $nsgDmzName --resource-group $rgName
-} else {
+}
+else {
   Write-Verbose "Network Security Group already exists"
 }
 
@@ -278,13 +255,15 @@ if (-not $nsg) {
 
 $subnet = az network vnet subnet show --name $subnetName -g $rgName --vnet-name $vnetName 2>$null | ConvertFrom-Json
 if (-not $subnet) {
-  Write-Verbose "Creating core subnet $subnetName ($subnetV6, $subnetV4)"
+  Write-Verbose "Creating subnet $subnetName ($subnetV6, $subnetV4)"
   $subnet = az network vnet subnet create --name $subnetName `
     --address-prefix $subnetV6 $subnetV4 `
     --resource-group $rgName `
     --vnet-name $vnetName `
     --network-security-group $nsgName | ConvertFrom-Json
-} else {
+  if ($LASTEXITCODE -ne 0) { throw "create subnet failed." }
+}
+else {
   Write-Verbose "Subnet already exists"
 }
 
@@ -307,12 +286,13 @@ if (-not $identity) {
   Write-Verbose "Granting 'get, list' secret permissions on '$kvName' to identity '$identityName' ($principalId)"
   az keyvault set-policy `
     --name $kvName `
-    --resource-group $rgName `
+    --resource-group $coreRgName `
     --object-id $principalId `
     --secret-permissions get list `
     --output none
   if ($LASTEXITCODE -ne 0) { throw "az keyvault set-policy failed for identity '$identityName' on '$kvName'" }
-} else {
+}
+else {
   Write-Verbose "Managed Identity already exists"
 }
 $uamiResourceId = $identity.id
@@ -323,17 +303,17 @@ $uamiClientId = $identity.clientId
 
 $disk = az disk show --name $diskName --resource-group $rgName 2>$null | ConvertFrom-Json
 if (-not $disk) {
-  Write-Verbose "Creating managed disk '$diskName' (${SizeGiB} GiB, $Sku, empty)"
-  $disk =- az disk create `
-      --name $diskName `
-      --resource-group $rgName `
-      --location $location `
-      --size-gb $DiskSizeGiB `
-      --sku $DiskSku `
-      --tags $tags `
-      --output none | ConvertFrom-Json
+  Write-Verbose "Creating managed disk '$diskName' (${DiskSizeGiB} GiB, $DiskSku, empty)"
+  $disk = az disk create `
+    --name $diskName `
+    --resource-group $rgName `
+    --location $location `
+    --size-gb $DiskSizeGiB `
+    --sku $DiskSku `
+    --tags $tags | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0) { throw "az disk create '$diskName' failed." }
-} else {
+}
+else {
   Write-Verbose "Models Data Disk already exists"
 }
 $diskId = $disk.id
@@ -353,7 +333,8 @@ if (-not $pipV6) {
     --allocation-method static  `
     --version IPv6 `
     --tags $tags
-} else {
+}
+else {
   Write-Verbose "Public IPv6 already exists"
 }
 
@@ -370,7 +351,8 @@ if ($AddPublicIpv4) {
       --allocation-method static  `
       --version IPv4 `
       --tags $tags
-  } else {
+  }
+  else {
     Write-Verbose "Public IPv4 already exists"
   }
 }
@@ -398,7 +380,7 @@ if (-not $nic) {
   az network nic create `
     --name $nicName `
     --resource-group $rgName `
-    --subnet $gwSnet.Id `
+    --subnet $subnet.Id `
     --tags $tags
   if ($LASTEXITCODE -ne 0) { throw "az network nic create '$nicName' failed." }
 
@@ -407,7 +389,7 @@ if (-not $nic) {
     --name $ipcV6Name `
     --nic-name $nicName  `
     --resource-group $rgName `
-    --subnet $gwSnet.Id `
+    --subnet $subnet.Id `
     --private-ip-address-version IPv6 `
     --public-ip-address $pipV6Name
   if ($LASTEXITCODE -ne 0) { throw "az network nic ip-config create (IPv6) failed." }
@@ -425,7 +407,8 @@ if (-not $nic) {
   Write-Verbose "Ensuring --ip-forwarding=true on NIC '$nicName'"
   az network nic update --name $nicName --resource-group $rgName --ip-forwarding true --output none
   if ($LASTEXITCODE -ne 0) { throw "az network nic update --ip-forwarding failed." }
-} else {
+}
+else {
   Write-Verbose "Network interface already exists"
 }
 
@@ -435,10 +418,11 @@ if (-not $nic) {
 # Check Quota: standardNCASv3Family covers Standard_NC4as_T4_v3 / NC8as_T4_v3 / NC16as_T4_v3 / NC64as_T4_v3.
 
 if ($VmSize -eq 'Standard_NV6ads_A10_v5') {
-    $vmFamily = 'StandardNVADSA10v5Family'
-    $cpuRequired = 6
-} else {
-    throw "Unknown VmSize $VmSize"
+  $vmFamily = 'StandardNVADSA10v5Family'
+  $cpuRequired = 6
+}
+else {
+  throw "Unknown VmSize $VmSize"
 }
 
 Write-Verbose "Checking GPU quota for '$vmFamily' in '$($location)'..."
@@ -450,16 +434,17 @@ Write-Verbose "Checking GPU quota for '$vmFamily' in '$($location)'..."
 # Practical StandardNVADSA10v5Family: Standard_NV6ads_A10_v5, Standard_NV12ads_A10_v5, Standard_NV36ads_A10_v5=
 $quota = az vm list-usage --location $location --query "[?name.value=='$vmFamily'] | [0]" --output json 2>$null | ConvertFrom-Json
 if ($quota) {
-    Write-Verbose "  current usage: $($quota.currentValue) / limit: $($quota.limit)"
-    $cpuAvailable = $quota.limit - $quota.currentValue
-    if ([int]$cpuAvailable -lt $cpuRequired) {
-        throw @"
+  Write-Verbose "  current usage: $($quota.currentValue) / limit: $($quota.limit)"
+  $cpuAvailable = $quota.limit - $quota.currentValue
+  if ([int]$cpuAvailable -lt $cpuRequired) {
+    throw @"
 GPU quota '$vmFamily' in '$location' is $($quota.limit). $VmSize needs $cpuRequired vCPUs.
 Request a quota increase: https://learn.microsoft.com/azure/quotas/per-vm-quota-requests
 "@
-    }
-} else {
-        throw @"
+  }
+}
+else {
+  throw @"
 Could not read '$vmFamily' quota for '$location' (the quota family may not be exposed in this region). $VmSize needs $cpuRequired vCPUs.
 "@
 }
@@ -485,24 +470,24 @@ if (-not $vm) {
   # substituted values pass through unchanged.
   $rendered = (Get-Content -Path $templatePath -Raw)
   $subs = [ordered]@{
-      '#INIT_HOST_NAMES#'          = $fqdnJoinedList
-      '#INIT_API_KEY#'             = $VllmApiKey
-      '#INIT_UAMI_CLIENT_ID#'      = $uamiClientId
-      '#INIT_CERT_EMAIL#'          = $certEmail
-      '#INIT_VLLM_VERSION#'        = $VllmVersion
-      '#INIT_SERVED_MODEL_NAME#'   = $ServedModelName
-      '#INIT_MODEL_DIR_NAME#'      = $ModelDirName
-      '#INIT_MODEL_MOUNT_POINT#'   = $ModelMountPoint
+    '#INIT_HOST_NAMES#'        = $fqdnJoinedList
+    '#INIT_API_KEY#'           = $VllmApiKey
+    '#INIT_UAMI_CLIENT_ID#'    = $uamiClientId
+    '#INIT_CERT_EMAIL#'        = $certEmail
+    '#INIT_VLLM_VERSION#'      = $VllmVersion
+    '#INIT_SERVED_MODEL_NAME#' = $ServedModelName
+    '#INIT_MODEL_DIR_NAME#'    = $ModelDirName
+    '#INIT_MODEL_MOUNT_POINT#' = $ModelMountPoint
   }
   foreach ($k in $subs.Keys) {
-      $rendered = $rendered.Replace($k, [string]$subs[$k])
+    $rendered = $rendered.Replace($k, [string]$subs[$k])
   }
   Set-Content -Path $renderedPath -Value $rendered -NoNewline
 
   # Post-render assertions.
   $leftover = [regex]::Matches($rendered, '#INIT_[A-Z_]+#')
   if ($leftover.Count -gt 0) {
-      throw "Unsubstituted cloud-init tokens remain: $(($leftover | ForEach-Object { $_.Value }) -join ', ')"
+    throw "Unsubstituted cloud-init tokens remain: $(($leftover | ForEach-Object { $_.Value }) -join ', ')"
   }
 
   # VM create: Ubuntu 22.04, UAMI, --attach-data-disks, custom-data cloud-init.
@@ -510,22 +495,23 @@ if (-not $vm) {
   $vmImage = 'Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest'
   Write-Verbose "Creating VM '$vmName' (size $VmSize, image $vmImage, UAMI '$identityName', attaching disk '$diskName')"
   az vm create `
-      --resource-group $rgName `
-      --name $vmName `
-      --location $location `
-      --size $VmSize `
-      --image $vmImage `
-      --os-disk-name $vmOsDisk `
-      --admin-username $AdminUsername `
-      --generate-ssh-keys `
-      --nics $nicName `
-      --assign-identity $uamiResourceId `
-      --attach-data-disks $diskId `
-      --custom-data $renderedPath `
-      --tags $tags `
-      --output none
-    if ($LASTEXITCODE -ne 0) { throw "az vm create '$vmName' failed." }
-} else {
+    --resource-group $rgName `
+    --name $vmName `
+    --location $location `
+    --size $VmSize `
+    --image $vmImage `
+    --os-disk-name $vmOsDisk `
+    --admin-username $AdminUsername `
+    --generate-ssh-keys `
+    --nics $nicName `
+    --assign-identity $uamiResourceId `
+    --attach-data-disks $diskId `
+    --custom-data $renderedPath `
+    --tags $tags `
+    --output none
+  if ($LASTEXITCODE -ne 0) { throw "az vm create '$vmName' failed." }
+}
+else {
   Write-Verbose "VM '$vmName' already present, skipping create."
 }
 
@@ -538,17 +524,18 @@ if (-not $vm) {
 $nvidiaExtName = 'NvidiaGpuDriverLinux'
 $nvidiaExt = az vm extension show --vm-name $vmName --resource-group $rgName --name $nvidiaExtName 2>$null | ConvertFrom-Json
 if (-not $nvidiaExt) {
-    Write-Verbose "Applying NVIDIA GPU Driver Linux extension to '$vmName'..."
-    az vm extension set `
-        --resource-group $rgName `
-        --vm-name $vmName `
-        --name $nvidiaExtName `
-        --publisher Microsoft.HpcCompute `
-        --version 1.10 `
-        --output none
-    if ($LASTEXITCODE -ne 0) { throw "az vm extension set NvidiaGpuDriverLinux failed." }
-} else {
-    Write-Verbose "NVIDIA GPU Driver extension already present, skipping."
+  Write-Verbose "Applying NVIDIA GPU Driver Linux extension to '$vmName'..."
+  az vm extension set `
+    --resource-group $rgName `
+    --vm-name $vmName `
+    --name $nvidiaExtName `
+    --publisher Microsoft.HpcCompute `
+    --version 1.10 `
+    --output none
+  if ($LASTEXITCODE -ne 0) { throw "az vm extension set NvidiaGpuDriverLinux failed." }
+}
+else {
+  Write-Verbose "NVIDIA GPU Driver extension already present, skipping."
 }
 
 # ---------------------------------------------------------------------------
@@ -556,13 +543,14 @@ if (-not $nvidiaExt) {
 # ---------------------------------------------------------------------------
 
 if ($ShutdownUtc) {
-    Write-Verbose "Applying auto-shutdown at $ShutdownUtc UTC"
-    if ($ShutdownEmail) {
-        az vm auto-shutdown -g $rgName -n $vmName --time $ShutdownUtc --email $ShutdownEmail --output none
-    } else {
-        az vm auto-shutdown -g $rgName -n $vmName --time $ShutdownUtc --output none
-    }
-    if ($LASTEXITCODE -ne 0) { throw "az vm auto-shutdown failed." }
+  Write-Verbose "Applying auto-shutdown at $ShutdownUtc UTC"
+  if ($ShutdownEmail) {
+    az vm auto-shutdown -g $rgName -n $vmName --time $ShutdownUtc --email $ShutdownEmail --output none
+  }
+  else {
+    az vm auto-shutdown -g $rgName -n $vmName --time $ShutdownUtc --output none
+  }
+  if ($LASTEXITCODE -ne 0) { throw "az vm auto-shutdown failed." }
 }
 
 # ---------------------------------------------------------------------------
@@ -572,27 +560,27 @@ if ($ShutdownUtc) {
 
 Write-Verbose "Waiting for cloud-init to finish on '$vmName' (~10-15 min on first boot; pip install vllm dominates)..."
 $ciRaw = az vm run-command invoke `
-    --resource-group $rgName `
-    --name $vmName `
-    --command-id RunShellScript `
-    --scripts 'cloud-init status --wait && echo CLOUD_INIT_DONE' `
-    --output json 2>&1
+  --resource-group $rgName `
+  --name $vmName `
+  --command-id RunShellScript `
+  --scripts 'cloud-init status --wait && echo CLOUD_INIT_DONE' `
+  --output json 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "cloud-init poll run-command failed; output follows:"
-    Write-Warning $ciRaw
-    throw "cloud-init did not reach 'done' on '$vmName'."
+  Write-Warning "cloud-init poll run-command failed; output follows:"
+  Write-Warning $ciRaw
+  throw "cloud-init did not reach 'done' on '$vmName'."
 }
 $ciParsed = $ciRaw | ConvertFrom-Json -ErrorAction SilentlyContinue
 $ciStdout = ($ciParsed.value | ForEach-Object { "$($_.message)" }) -join "`n"
 if (-not ($ciStdout -and ($ciStdout -match 'CLOUD_INIT_DONE'))) {
-    Write-Warning "cloud-init status did not return 'done'; fetching /var/log/cloud-init-output.log for context..."
-    az vm run-command invoke `
-        --resource-group $rgName `
-        --name $vmName `
-        --command-id RunShellScript `
-        --scripts 'tail -n 200 /var/log/cloud-init-output.log' `
-        --output table 2>&1 | Write-Host
-    throw "cloud-init did not reach 'done' on '$vmName'."
+  Write-Warning "cloud-init status did not return 'done'; fetching /var/log/cloud-init-output.log for context..."
+  az vm run-command invoke `
+    --resource-group $rgName `
+    --name $vmName `
+    --command-id RunShellScript `
+    --scripts 'tail -n 200 /var/log/cloud-init-output.log' `
+    --output table 2>&1 | Write-Host
+  throw "cloud-init did not reach 'done' on '$vmName'."
 }
 # To check: ssh llm-0x419d-dev-001.australiaeast.cloudapp.azure.com
 Write-Verbose "cloud-init reported 'done'."
